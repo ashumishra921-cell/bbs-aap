@@ -7,6 +7,7 @@ import Ionicons from "@react-native-vector-icons/ionicons";
 import dayjs from "dayjs";
 
 import { api, loadAuth, User } from "@/src/api";
+import HelplineCard from "@/src/components/HelplineCard";
 import { makeStyles, useTheme } from "@/src/theme";
 
 export default function SubscriberHome() {
@@ -124,6 +125,8 @@ export default function SubscriberHome() {
           <ActionTile icon="receipt" label="Invoices" onPress={() => router.push("/(subscriber)/profile")} testID="tile-invoices" />
           <ActionTile icon="chatbubble-ellipses" label="AI Chat" onPress={() => router.push("/chat")} testID="tile-chat" />
         </View>
+
+        <HelplineCard />
       </ScrollView>
     </View>
   );

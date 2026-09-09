@@ -24,3 +24,6 @@ Local Internet Service Provider (ISP) management mobile app (Expo React Native +
 ## Seeded Data
 - 4 role users (see test_credentials.md).
 - 4 broadband plans (₹499 / ₹799 / ₹1199 / ₹1599).
+
+## Helpline
+- Customer helpline 8826004211 shown as tap-to-call card on subscriber Home & Profile (src/components/HelplineCard.tsx).

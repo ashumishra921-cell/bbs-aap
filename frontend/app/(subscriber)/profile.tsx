@@ -6,6 +6,7 @@ import Ionicons from "@react-native-vector-icons/ionicons";
 import dayjs from "dayjs";
 
 import { api, clearAuth, loadAuth, User } from "@/src/api";
+import HelplineCard from "@/src/components/HelplineCard";
 import { makeStyles, useTheme } from "@/src/theme";
 
 export default function ProfileScreen() {
@@ -76,6 +77,8 @@ export default function ProfileScreen() {
             ))}
           </View>
         )}
+
+        <HelplineCard />
 
         <Pressable onPress={logout} style={styles.logout} testID="logout-btn">
           <Ionicons name="log-out-outline" size={20} color={colors.error} />

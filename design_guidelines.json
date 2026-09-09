@@ -1,0 +1,202 @@
+{
+  "app_name": "ISPManager",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "A structured, highly readable utility interface with clear data visualization and a professional teal anchor.",
+  "color": {
+    "surface": "#F9FAFB",
+    "onSurface": "#111827",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1F2937",
+    "surfaceTertiary": "#F3F4F6",
+    "onSurfaceTertiary": "#374151",
+    "surfaceInverse": "#111827",
+    "onSurfaceInverse": "#F9FAFB",
+    "brand": "#0D9488",
+    "brandPrimary": "#0F766E",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#115E59",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#CCFBF1",
+    "onBrandTertiary": "#115E59",
+    "success": "#059669",
+    "onSuccess": "#FFFFFF",
+    "warning": "#D97706",
+    "onWarning": "#FFFFFF",
+    "error": "#DC2626",
+    "onError": "#FFFFFF",
+    "info": "#0284C7",
+    "onInfo": "#FFFFFF",
+    "border": "#E5E7EB",
+    "borderStrong": "#D1D5DB",
+    "divider": "#F3F4F6",
+    "muted": "#6B7280",
+    "onBrand": "#FFFFFF"
+  },
+  "typography": {
+    "displayFontFamily": "Plus Jakarta Sans",
+    "textFontFamily": "Geist",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous vertical spacing, clear grouping of related elements to avoid dense dashboard feel. Maintain thumb zone clearance.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "1",
+  "navigation": "bottom_tabs",
+  "icon_set": "Ionicons",
+  "glassmorphism": {
+    "enabled": "true",
+    "do's": [
+      "Apply to sticky headers over scrolling content (Subscriber/Team dashboards)",
+      "Bottom tab bar",
+      "Floating action buttons (FAB) for the AI Chatbot"
+    ],
+    "dont's": [
+      "Never blur body content or list rows",
+      "Avoid on form inputs"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "haptics": {
+    "primary_button_press": "impactLight",
+    "tab_change": "selection",
+    "toggle_switch": "impactLight",
+    "plan_selection": "impactMedium",
+    "complaint_submit": "notificationSuccess"
+  },
+  "screens": [
+    {
+      "name": "Auth",
+      "purpose": "Multi-role Phone/OTP login gateway.",
+      "states": {
+        "loading": "Spinner during OTP verification",
+        "empty": "N/A",
+        "error": "Invalid OTP alert"
+      },
+      "layout": "Clean hero image/logo area, centered input for phone number. Bottom-anchored continue button."
+    },
+    {
+      "name": "Subscriber Dashboard",
+      "purpose": "Overview of current broadband plan, data usage, and quick actions.",
+      "states": {
+        "loading": "Skeleton loaders for data usage and plan details",
+        "empty": "No active plan - Prompt to recharge",
+        "error": "Failed to load plan data with retry button"
+      },
+      "layout": "Card-based layout. Top: prominent progress bar card for data usage. Middle: Horizontal grid for quick actions (Recharge, Invoices, Complaints). Bottom: AI chatbot FAB anchored to the right."
+    },
+    {
+      "name": "Recharge & Plans",
+      "purpose": "Browse available internet plans and initiate mock UPI payment.",
+      "states": {
+        "loading": "Spinner loading plans catalog",
+        "empty": "No plans available in your area",
+        "error": "Failed to fetch plans"
+      },
+      "layout": "Vertical list of cards displaying plan speed, data cap, and price. Sticky 'Pay via UPI (Mock)' CTA at the bottom once a plan is selected."
+    },
+    {
+      "name": "Complaints",
+      "purpose": "Register and track network/service complaints.",
+      "states": {
+        "loading": "Loading complaint history",
+        "empty": "Empty desk illustration - No active complaints.",
+        "error": "Failed to submit/load complaints"
+      },
+      "layout": "Segmented control (Active vs Resolved). Floating Action Button to create a new ticket. Detail view inside a bottom sheet."
+    },
+    {
+      "name": "Team Member Dashboard",
+      "purpose": "View assigned complaints and update their resolution status.",
+      "states": {
+        "loading": "Loading assigned tickets",
+        "empty": "Empty desk illustration - No pending tasks. Great job!",
+        "error": "Could not fetch assignments"
+      },
+      "layout": "List of tickets with status badges. Tapping opens full-screen view to update status (Pending, In Progress, Resolved)."
+    },
+    {
+      "name": "Admin Dashboard",
+      "purpose": "High-level overview of subscribers, team performance, and all complaints.",
+      "states": {
+        "loading": "Loading metrics",
+        "empty": "N/A",
+        "error": "Failed to load admin metrics"
+      },
+      "layout": "Dense data view using cleanly padded cards. Metrics grid at the top, list of recent critical complaints below. Navigation to 'Manage Team' and 'Manage Subscribers'."
+    },
+    {
+      "name": "AI Chatbot",
+      "purpose": "Hindi-supported floating chatbot for instant support.",
+      "states": {
+        "loading": "Chatbot typing indicator",
+        "empty": "Start a new conversation",
+        "error": "Connection lost"
+      },
+      "layout": "Full-screen chat interface. Message bubbles with clear contrast (brandTertiary for user, surfaceSecondary for bot). Input field sticky at bottom."
+    },
+    {
+      "name": "Invoices",
+      "purpose": "List of billing invoices with detailed PDF-like view.",
+      "states": {
+        "loading": "Loading billing history",
+        "empty": "No invoices generated yet.",
+        "error": "Failed to fetch invoices"
+      },
+      "layout": "Simple list view of months/amounts. Tapping opens a structured modal or screen mimicking an invoice layout."
+    }
+  ],
+  "images": {
+    "hero_background": {
+      "url": "https://images.unsplash.com/photo-1761740533449-b8d4385e60b0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2MTJ8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGdlb21ldHJpYyUyMG5ldHdvcmslMjBwYXR0ZXJufGVufDB8fHx8MTc4MjcyNzM2NXww&ixlib=rb-4.1.0&q=85",
+      "dark": "https://images.unsplash.com/photo-1641495623770-a5dc919f38d2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNDR8MHwxfHNlYXJjaHwyfHxkYXJrJTIwYWJzdHJhY3QlMjBnZW9tZXRyaWMlMjBkYXRhJTIwbmV0d29yayUyMHBhdHRlcm58ZW58MHx8fHwxNzg2MTMwMjE5fDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Abstract geometric network pattern"
+    },
+    "empty_desk": {
+      "url": "https://images.unsplash.com/photo-1623177623442-979c1e42c255?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2ODh8MHwxfHNlYXJjaHwxfHxlbXB0eSUyMGRlc2slMjBtb2Rlcm4lMjBvZmZpY2V8ZW58MHx8fHwxNzg4OTY1NTA3fDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Empty modern desk indicating no items"
+    },
+    "router_profile": {
+      "url": "https://images.unsplash.com/photo-1745847768408-b7b83796cae6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMHdpZmklMjByb3V0ZXIlMjBkaWdpdGFsJTIwbmV0d29ya3xlbnwwfHx8fDE3ODg5NjU1MDd8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Close up of digital wifi router"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Honor the iOS-Native Clean personality. Ensure generous padding and avoid cluttering screens, especially for Subscriber dashboard.",
+    "Data usage MUST use a progress bar to quickly communicate remaining allowances. This is a critical pattern for telecom apps.",
+    "Implement the Chatbot as a floating action button (FAB) on main dashboards, leading to a dedicated chat screen. Ensure the chat interface supports Hindi characters natively.",
+    "For the multi-role login, use a clean interface with OTP. Handle role-based redirection to the appropriate dashboard post-login.",
+    "Mock the UPI recharge flow by having a sticky 'Pay via UPI' button after a plan is selected. Show a mock success state.",
+    "When displaying images (like hero backgrounds), ensure a gradient-to-dark scrim pattern is applied underneath text to maintain WCAG contrast.",
+    "Never use raw hex colors in components; exclusively map to the provided theme tokens."
+  ]
+}

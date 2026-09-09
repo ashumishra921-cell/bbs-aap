@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 2 (MSG91 demo fallback + OTP resend + HelplineCard) fully verified. Backend: 16/16 new pytest tests PASSED (auth/config sms_enabled=false + demo_otp=123456 + resend_cooldown=30, phone normalization for '9999999996' / '+91 9999999996' / '09999999996' / '91-9999999996' / '+91-9999999996', invalid '12345' rejected with Hindi detail, wrong OTP -> 400 'गलत OTP', +919999999996 verified as Amit Sharma subscriber, new user signup with random 6-9 starting 10-digit + name, and regression role-routing for team/admin/super_admin). Frontend (Expo web, 390x844): otp-hint on login shows 'Demo OTP: 123456' (after auth/config load). After request-otp, OTP screen otp-sub shows '+91 9999999996 · Demo OTP 123456 दर्ज करें' and resend-otp-btn text is 'OTP फिर से भेजें (30s)' with aria-disabled=true; countdown decrements 30->27 in 3s, confirming timer works. Entering wrong 000000 shows 'गलत OTP' toast. Correct 123456 lands on subscriber home which shows helpline-card with helpline-call-btn (Call) and helpline-whatsapp-btn (WhatsApp) — both pressable. Profile tab also renders helpline-card with both buttons. Regression: team (9999999997) routed to /assigned, admin (9999999998) routed to /overview correctly.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["React Native Web deprecation warnings persist: 'shadow*' style props deprecated (use boxShadow); props.pointerEvents deprecated (use style.pointerEvents). Non-blocking, carried over from iteration_1."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter2_otp_msg91.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iter2_results.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional (carry-over): migrate deprecated shadow*/pointerEvents style props to boxShadow/style.pointerEvents to silence RN Web warnings."
+  ],
+  "critical_code_review_comments": [
+    "normalize_phone() correctly strips +, spaces, dashes, leading 91 (12-digit) and leading 0 (11-digit); regex [6-9]\\d{9} enforced.",
+    "uses_mock_otp() short-circuits when SMS_ENABLED is False (current .env state) so ALL numbers -> demo OTP 123456 as required.",
+    "Resend cooldown (_otp_last_sent 30s) only applied when NOT using mock OTP — so demo path allows unlimited retries, matching client-side countdown UX.",
+    "verify_otp mutates body.phone to normalized digits before DB lookup — ensures '+91 9999999996' still finds seeded 'Amit Sharma'.",
+    "HelplineCard uses Linking.openURL('tel:...') and 'https://wa.me/91...' — will work on native; on web tel: is best-effort, but buttons are pressable.",
+    "otp.tsx: resend button correctly disabled while cooldown>0 || resending; countdown reset to 30 on resend success.",
+    "index.tsx: authConfig() called only when NOT logged in (after loadAuth) — good.",
+    "Existing carryover: chat.tsx still lacks auth-gate for deep-link (from iteration_1) — not part of this iteration."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter2_otp_msg91.py", "/app/test_reports/iteration_2.json", "/app/test_reports/pytest/iter2_results.xml"],
+  "success_rate": {"backend": "100% (16/16 new + 20/20 prior)", "frontend": "100% (all listed acceptance points verified)"},
+  "seed_data_creation": "One TEST_NewUser subscriber was created via random 10-digit phone during test_new_user_signup_random_number_and_name. No production data modified. Seeded 9999999996/97/98/99 accounts used as-is.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "MSG91 keys still empty in backend/.env -> SMS_ENABLED=false, all numbers use demo OTP 123456. Tests live at /app/backend/tests/test_iter2_otp_msg91.py (iteration 2) and /app/backend/tests/backend_test.py (iteration 1). Frontend testIDs verified working: phone-input, request-otp-btn, otp-hint, otp-sub, otp-input, name-input, verify-otp-btn, resend-otp-btn, back-btn, helpline-card, helpline-call-btn, helpline-whatsapp-btn. Countdown mechanism confirmed decrementing 1s per tick. tel:/wa.me links only truly navigate on native; on web they're best-effort — do not fail on navigation."
+}

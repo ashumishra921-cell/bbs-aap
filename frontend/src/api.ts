@@ -50,8 +50,10 @@ async function request<T = any>(path: string, options: RequestInit = {}): Promis
 }
 
 export const api = {
+  authConfig: () =>
+    request<{ sms_enabled: boolean; demo_otp: string | null; resend_cooldown_sec: number }>("/auth/config"),
   requestOtp: (phone: string) =>
-    request<{ success: boolean; otp: string; is_new_user: boolean }>("/auth/request-otp", {
+    request<{ success: boolean; otp: string | null; mode: "demo" | "sms"; is_new_user: boolean }>("/auth/request-otp", {
       method: "POST",
       body: JSON.stringify({ phone }),
     }),
@@ -85,6 +87,9 @@ export const api = {
   deleteTeam: (id: string) => request(`/team/${id}`, { method: "DELETE" }),
 
   subscribers: () => request<any[]>("/subscribers"),
+  createSubscriber: (b: { phone: string; name: string; address?: string }) =>
+    request("/subscribers", { method: "POST", body: JSON.stringify(b) }),
+  deleteSubscriber: (id: string) => request(`/subscribers/${id}`, { method: "DELETE" }),
   adminMetrics: () => request<any>("/admin/metrics"),
 
   chat: (message: string) => request<{ reply: string }>("/chat", { method: "POST", body: JSON.stringify({ message }) }),

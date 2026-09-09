@@ -5,9 +5,11 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import re
 import logging
 import uuid
 import jwt
+import httpx
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
@@ -22,7 +24,14 @@ db = client[os.environ['DB_NAME']]
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'dev_secret')
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
-MOCK_OTP = "123456"
+MOCK_OTP = os.environ.get('DEMO_OTP', '123456')
+DEMO_NUMBERS = {p.strip() for p in os.environ.get('DEMO_NUMBERS', '9999999996,9999999997,9999999998,9999999999').split(',') if p.strip()}
+MSG91_AUTH_KEY = os.environ.get('MSG91_AUTH_KEY', '').strip()
+MSG91_TEMPLATE_ID = os.environ.get('MSG91_TEMPLATE_ID', '').strip()
+MSG91_DLT_TE_ID = os.environ.get('MSG91_DLT_TE_ID', '').strip()
+SMS_ENABLED = bool(MSG91_AUTH_KEY and MSG91_TEMPLATE_ID)
+OTP_RESEND_COOLDOWN_SEC = 30
+_otp_last_sent: dict[str, datetime] = {}
 
 app = FastAPI(title="Broadband Solutions 24x7")
 api_router = APIRouter(prefix="/api")
@@ -150,6 +159,12 @@ class CreateTeamMemberBody(BaseModel):
     role: Literal["team", "admin"] = "team"
 
 
+class CreateSubscriberBody(BaseModel):
+    phone: str
+    name: str
+    address: Optional[str] = None
+
+
 class ChatBody(BaseModel):
     message: str
 
@@ -195,22 +210,96 @@ async def root():
     return {"app": "Broadband Solutions 24x7", "status": "ok"}
 
 
+def normalize_phone(value: str) -> str:
+    digits = re.sub(r"\D", "", value or "")
+    if digits.startswith("91") and len(digits) == 12:
+        digits = digits[2:]
+    elif digits.startswith("0") and len(digits) == 11:
+        digits = digits[1:]
+    if not re.fullmatch(r"[6-9]\d{9}", digits):
+        raise HTTPException(status_code=400, detail="कृपया सही 10 अंकों का मोबाइल नंबर दर्ज करें")
+    return digits
+
+
+def uses_mock_otp(phone: str) -> bool:
+    return (not SMS_ENABLED) or phone in DEMO_NUMBERS
+
+
+async def msg91_send_otp(phone: str) -> None:
+    params = {
+        "template_id": MSG91_TEMPLATE_ID,
+        "mobile": f"91{phone}",
+        "authkey": MSG91_AUTH_KEY,
+        "otp_length": 6,
+        "otp_expiry": 5,
+    }
+    if MSG91_DLT_TE_ID:
+        params["DLT_TE_ID"] = MSG91_DLT_TE_ID
+    try:
+        async with httpx.AsyncClient(timeout=10) as http:
+            r = await http.post("https://control.msg91.com/api/v5/otp", params=params, headers={"Accept": "application/json"})
+        data = r.json()
+    except Exception as e:
+        logger.error(f"MSG91 send failed: {e}")
+        raise HTTPException(status_code=502, detail="SMS भेजने में समस्या, कृपया बाद में प्रयास करें")
+    if r.status_code >= 400 or str(data.get("type", "")).lower() == "error":
+        logger.error(f"MSG91 rejected send: {data}")
+        raise HTTPException(status_code=502, detail="SMS भेजने में समस्या, कृपया बाद में प्रयास करें")
+
+
+async def msg91_verify_otp(phone: str, otp: str) -> None:
+    try:
+        async with httpx.AsyncClient(timeout=10) as http:
+            r = await http.get(
+                "https://control.msg91.com/api/v5/otp/verify",
+                params={"mobile": f"91{phone}", "otp": otp},
+                headers={"authkey": MSG91_AUTH_KEY, "Accept": "application/json"},
+            )
+        data = r.json()
+    except Exception as e:
+        logger.error(f"MSG91 verify failed: {e}")
+        raise HTTPException(status_code=502, detail="OTP जांच में समस्या, कृपया बाद में प्रयास करें")
+    if r.status_code >= 400 or str(data.get("type", "")).lower() != "success":
+        raise HTTPException(status_code=400, detail="गलत या समाप्त OTP")
+
+
+@api_router.get("/auth/config")
+async def auth_config():
+    return {"sms_enabled": SMS_ENABLED, "demo_otp": None if SMS_ENABLED else MOCK_OTP, "resend_cooldown_sec": OTP_RESEND_COOLDOWN_SEC}
+
+
 @api_router.post("/auth/request-otp")
 async def request_otp(body: RequestOtpBody):
-    user = await db.users.find_one({"phone": body.phone}, {"_id": 0})
+    phone = normalize_phone(body.phone)
+    user = await db.users.find_one({"phone": phone}, {"_id": 0})
+    mock = uses_mock_otp(phone)
+    now = datetime.now(timezone.utc)
+    last = _otp_last_sent.get(phone)
+    if not mock and last and (now - last).total_seconds() < OTP_RESEND_COOLDOWN_SEC:
+        wait = OTP_RESEND_COOLDOWN_SEC - int((now - last).total_seconds())
+        raise HTTPException(status_code=429, detail=f"कृपया {wait} सेकंड बाद पुनः प्रयास करें")
+    if not mock:
+        await msg91_send_otp(phone)
+    _otp_last_sent[phone] = now
     return {
         "success": True,
-        "message": "OTP sent (mocked). Use 123456",
-        "otp": MOCK_OTP,
+        "mode": "demo" if mock else "sms",
+        "message": f"Demo OTP: {MOCK_OTP}" if mock else "OTP SMS भेजा गया",
+        "otp": MOCK_OTP if mock else None,
         "is_new_user": user is None,
     }
 
 
 @api_router.post("/auth/verify-otp")
 async def verify_otp(body: VerifyOtpBody):
-    if body.otp != MOCK_OTP:
-        raise HTTPException(status_code=400, detail="Invalid OTP")
-    user = await db.users.find_one({"phone": body.phone}, {"_id": 0})
+    phone = normalize_phone(body.phone)
+    if uses_mock_otp(phone):
+        if body.otp != MOCK_OTP:
+            raise HTTPException(status_code=400, detail="गलत OTP")
+    else:
+        await msg91_verify_otp(phone, body.otp)
+    body.phone = phone
+    user = await db.users.find_one({"phone": phone}, {"_id": 0})
     if not user:
         # new subscriber signup
         new_user = User(phone=body.phone, name=body.name or f"User {body.phone[-4:]}", role="subscriber")
@@ -413,6 +502,29 @@ async def list_subscribers(user: dict = Depends(require_role("admin", "super_adm
         it["active_plan"] = sub["plan_name"] if sub else None
         it["expires_at"] = sub["expires_at"].isoformat() if sub else None
     return items
+
+
+@api_router.post("/subscribers")
+async def create_subscriber(body: CreateSubscriberBody, user: dict = Depends(require_role("super_admin"))):
+    phone = normalize_phone(body.phone)
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    if await db.users.find_one({"phone": phone}):
+        raise HTTPException(status_code=400, detail="Phone already exists")
+    new_user = User(phone=phone, name=body.name.strip(), role="subscriber", address=body.address)
+    await db.users.insert_one(new_user.model_dump())
+    return new_user.model_dump()
+
+
+@api_router.delete("/subscribers/{uid}")
+async def delete_subscriber(uid: str, user: dict = Depends(require_role("super_admin"))):
+    target = await db.users.find_one({"id": uid, "role": "subscriber"}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Subscriber not found")
+    await db.users.delete_one({"id": uid})
+    await db.subscriptions.delete_many({"user_id": uid})
+    await db.complaints.delete_many({"user_id": uid})
+    return {"success": True}
 
 
 # ---------------------- Admin metrics ----------------------

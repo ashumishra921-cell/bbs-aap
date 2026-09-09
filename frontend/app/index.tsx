@@ -29,6 +29,7 @@ export default function LoginScreen() {
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const [booting, setBooting] = useState(true);
+  const [demoOtp, setDemoOtp] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -37,6 +38,7 @@ export default function LoginScreen() {
         redirectByRole(user.role);
       } else {
         setBooting(false);
+        api.authConfig().then((c) => setDemoOtp(c.demo_otp)).catch(() => {});
       }
     })();
   }, []);
@@ -56,7 +58,7 @@ export default function LoginScreen() {
     try {
       const res = await api.requestOtp(phone);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      router.push({ pathname: "/otp", params: { phone, isNew: res.is_new_user ? "1" : "0" } });
+      router.push({ pathname: "/otp", params: { phone, isNew: res.is_new_user ? "1" : "0", mode: res.mode } });
     } catch (e: any) {
       toast.show(e.message || "Something went wrong", "error");
     } finally {
@@ -127,7 +129,9 @@ export default function LoginScreen() {
 
           <View style={styles.hintBox}>
             <Ionicons name="information-circle" size={16} color={colors.info} />
-            <Text style={styles.hintText}>Demo OTP: 123456</Text>
+            <Text style={styles.hintText} testID="otp-hint">
+              {demoOtp ? `Demo OTP: ${demoOtp}` : "OTP आपके मोबाइल पर SMS से आएगा (Demo accounts: 123456)"}
+            </Text>
           </View>
 
           <View style={styles.demoNumbers}>

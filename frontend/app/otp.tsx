@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -20,7 +20,7 @@ import { makeStyles, useTheme } from "@/src/theme";
 
 export default function OtpScreen() {
   const router = useRouter();
-  const { phone, isNew } = useLocalSearchParams<{ phone: string; isNew: string }>();
+  const { phone, isNew, mode } = useLocalSearchParams<{ phone: string; isNew: string; mode: string }>();
   const styles = useStyles();
   const { colors } = useTheme();
   const toast = useToast();
@@ -28,6 +28,27 @@ export default function OtpScreen() {
   const [otp, setOtp] = useState("");
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [cooldown, setCooldown] = useState(30);
+  const [resending, setResending] = useState(false);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  const resend = async () => {
+    setResending(true);
+    try {
+      const res = await api.requestOtp(phone as string);
+      toast.show(res.mode === "sms" ? "OTP फिर से SMS किया गया" : `Demo OTP: ${res.otp}`, "success");
+      setCooldown(30);
+    } catch (e: any) {
+      toast.show(e.message || "Resend failed", "error");
+    } finally {
+      setResending(false);
+    }
+  };
 
   const verify = async () => {
     if (otp.length !== 6) {
@@ -69,7 +90,9 @@ export default function OtpScreen() {
 
       <View style={styles.body}>
         <Text style={styles.title}>OTP दर्ज करें</Text>
-        <Text style={styles.sub}>+91 {phone} पर भेजा गया</Text>
+        <Text style={styles.sub} testID="otp-sub">
+          {mode === "sms" ? `+91 ${phone} पर SMS भेजा गया` : `+91 ${phone} · Demo OTP 123456 दर्ज करें`}
+        </Text>
 
         <TextInput
           testID="otp-input"
@@ -106,6 +129,21 @@ export default function OtpScreen() {
           ]}
         >
           {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryBtnText}>सत्यापित करें</Text>}
+        </Pressable>
+
+        <Pressable
+          testID="resend-otp-btn"
+          onPress={resend}
+          disabled={cooldown > 0 || resending}
+          style={styles.resendBtn}
+        >
+          {resending ? (
+            <ActivityIndicator size="small" color={colors.brandPrimary} />
+          ) : (
+            <Text style={[styles.resendText, { color: cooldown > 0 ? colors.muted : colors.brandPrimary }]}>
+              {cooldown > 0 ? `OTP फिर से भेजें (${cooldown}s)` : "OTP फिर से भेजें"}
+            </Text>
+          )}
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -157,4 +195,6 @@ const useStyles = makeStyles((colors) => ({
     justifyContent: "center",
   },
   primaryBtnText: { color: "#FFFFFF", fontWeight: "700", fontSize: 16 },
+  resendBtn: { marginTop: 16, height: 44, alignItems: "center", justifyContent: "center" },
+  resendText: { fontWeight: "700", fontSize: 14 },
 }));

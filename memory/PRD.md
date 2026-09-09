@@ -27,3 +27,13 @@ Local Internet Service Provider (ISP) management mobile app (Expo React Native +
 
 ## Helpline
 - Customer helpline 8826004211 shown as tap-to-call card on subscriber Home & Profile (src/components/HelplineCard.tsx).
+
+## SMS OTP + WhatsApp (added)
+- Backend supports MSG91 OTP (send `POST control.msg91.com/api/v5/otp`, verify `GET /api/v5/otp/verify`). Env: MSG91_AUTH_KEY, MSG91_TEMPLATE_ID, MSG91_DLT_TE_ID, DEMO_NUMBERS, DEMO_OTP. Falls back to demo OTP for all numbers when keys are empty.
+- Phone normalization (+91/0 prefix), 30s resend cooldown for real SMS, `GET /api/auth/config`.
+- OTP screen: mode-aware subtitle + "OTP फिर से भेजें" resend button with 30s countdown.
+- HelplineCard: Call + WhatsApp (wa.me/918826004211) buttons on subscriber Home & Profile.
+
+## Subscriber management (Super Admin only)
+- `POST /api/subscribers` {phone,name,address?} and `DELETE /api/subscribers/{id}` — require_role("super_admin"); delete also removes their subscriptions & complaints.
+- Admin "Users" tab: add FAB + bottom-sheet form and per-row delete (with confirm) visible only to super_admin; admin/team see read-only list.

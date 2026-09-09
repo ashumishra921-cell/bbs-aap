@@ -37,3 +37,6 @@ Local Internet Service Provider (ISP) management mobile app (Expo React Native +
 ## Subscriber management (Super Admin only)
 - `POST /api/subscribers` {phone,name,address?} and `DELETE /api/subscribers/{id}` — require_role("super_admin"); delete also removes their subscriptions & complaints.
 - Admin "Users" tab: add FAB + bottom-sheet form and per-row delete (with confirm) visible only to super_admin; admin/team see read-only list.
+
+## Deployment
+- Root-level GET / and GET /health (plus /api/health) return 200 for platform health probes.

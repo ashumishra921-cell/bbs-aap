@@ -204,6 +204,14 @@ def clean(doc):
     return doc
 
 
+# ---------------------- Health (root-level, used by deployment probes) ----------------------
+@app.get("/")
+@app.get("/health")
+@api_router.get("/health")
+async def health():
+    return {"status": "ok", "app": "Broadband Solutions 24x7"}
+
+
 # ---------------------- Auth ----------------------
 @api_router.get("/")
 async def root():

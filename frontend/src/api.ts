@@ -64,6 +64,9 @@ export const api = {
       body: JSON.stringify({ phone, otp, name }),
     }),
   me: () => request<User>("/auth/me"),
+  deleteMyAccount: () => request("/auth/me", { method: "DELETE" }),
+  badges: () => request<any>("/badges"),
+  adminExpiring: (days = 3) => request<any[]>(`/admin/expiring?days=${days}`),
 
   plans: () => request<any[]>("/plans"),
   createPlan: (p: any) => request("/plans", { method: "POST", body: JSON.stringify(p) }),

@@ -835,6 +835,78 @@ async def admin_metrics(user: dict = Depends(require_role("admin", "super_admin"
     }
 
 
+EXPIRY_WINDOW_DAYS = 3
+
+
+async def expiring_subscriptions(days: int = EXPIRY_WINDOW_DAYS) -> list:
+    now = datetime.now(timezone.utc)
+    subs = await db.subscriptions.find(
+        {"status": "active", "expires_at": {"$lte": now + timedelta(days=days)}}, {"_id": 0}
+    ).sort("expires_at", 1).to_list(500)
+    if not subs:
+        return []
+    users = await db.users.find({"id": {"$in": [s["user_id"] for s in subs]}}, {"_id": 0, "id": 1, "name": 1, "phone": 1, "address": 1}).to_list(500)
+    umap = {u["id"]: u for u in users}
+    out = []
+    for s in subs:
+        u = umap.get(s["user_id"])
+        if not u:
+            continue
+        out.append({
+            "user_id": u["id"], "name": u["name"], "phone": u["phone"], "address": u.get("address"),
+            "plan_name": s["plan_name"], "expires_at": s["expires_at"],
+            "days_left": max(0, (s["expires_at"] - now).days),
+            "expired": s["expires_at"] <= now,
+        })
+    return out
+
+
+@api_router.get("/admin/expiring")
+async def admin_expiring(days: int = EXPIRY_WINDOW_DAYS, user: dict = Depends(require_role("admin", "super_admin"))):
+    return await expiring_subscriptions(days)
+
+
+@api_router.get("/badges")
+async def badges(user: dict = Depends(get_current_user)):
+    role = user["role"]
+    if role == "team":
+        new_tickets = await db.complaints.count_documents({"$or": [
+            {"assigned_to": user["id"], "status": "assigned"},
+            {"assigned_to": None, "status": "open"},
+        ]})
+        return {"new_tickets": new_tickets}
+    if role in ("admin", "super_admin"):
+        return {
+            "pending_payments": await db.payments.count_documents({"status": "pending"}),
+            "open_tickets": await db.complaints.count_documents({"status": "open"}),
+            "expiring_soon": len(await expiring_subscriptions()),
+        }
+    sub = await db.subscriptions.find_one({"user_id": user["id"], "status": "active"}, {"_id": 0})
+    now = datetime.now(timezone.utc)
+    return {
+        "expiring_soon": bool(sub and sub["expires_at"] <= now + timedelta(days=EXPIRY_WINDOW_DAYS)),
+        "days_left": max(0, (sub["expires_at"] - now).days) if sub else None,
+    }
+
+
+@api_router.delete("/auth/me")
+async def delete_my_account(user: dict = Depends(get_current_user)):
+    if user["role"] == "super_admin":
+        raise HTTPException(status_code=403, detail="Super Admin account cannot be deleted from the app")
+    uid = user["id"]
+    await db.subscriptions.delete_many({"user_id": uid})
+    await db.payments.delete_many({"user_id": uid, "status": "pending"})
+    await db.chat_messages.delete_many({"user_id": uid})
+    # keep invoices/complaints for records, but anonymise personal data
+    anon = {"user_name": "Deleted User", "user_phone": "deleted"}
+    await db.invoices.update_many({"user_id": uid}, {"$set": anon})
+    await db.complaints.update_many({"user_id": uid}, {"$set": anon})
+    await db.payments.update_many({"user_id": uid}, {"$set": anon})
+    await db.complaints.update_many({"assigned_to": uid}, {"$set": {"assigned_to": None, "assigned_to_name": None, "status": "open"}})
+    await db.users.delete_one({"id": uid})
+    return {"success": True}
+
+
 # ---------------------- Chat (Hindi AI Bot) ----------------------
 SYSTEM_PROMPT = (
     "You are 'Broadband Solutions 24x7' का हिंदी सहायक (Hindi customer support assistant). "

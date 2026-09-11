@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Linking, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@react-native-vector-icons/ionicons";
@@ -14,6 +14,7 @@ export default function AdminOverview() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [metrics, setMetrics] = useState<any | null>(null);
+  const [expiring, setExpiring] = useState<any[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -23,8 +24,9 @@ export default function AdminOverview() {
     try {
       const { user } = await loadAuth();
       setUser(user);
-      const m = await api.adminMetrics();
+      const [m, ex] = await Promise.all([api.adminMetrics(), api.adminExpiring(3)]);
       setMetrics(m);
+      setExpiring(ex);
     } catch (e: any) {
       setError(e.message || "Failed to load");
     } finally {
@@ -80,6 +82,39 @@ export default function AdminOverview() {
             <Text style={styles.revValue}>₹{metrics.total_revenue?.toLocaleString?.() || 0}</Text>
             <Text style={styles.revSub}>{metrics.resolved_complaints} tickets resolved</Text>
           </View>
+
+          <View style={styles.expCard} testID="expiring-card">
+            <View style={styles.expHeader}>
+              <Ionicons name="alarm" size={18} color={colors.warning} />
+              <Text style={styles.expTitle}>Expiring in 3 days</Text>
+              <View style={[styles.expCount, { backgroundColor: expiring.length ? colors.warning : colors.border }]}>
+                <Text style={styles.expCountTxt}>{expiring.length}</Text>
+              </View>
+            </View>
+            {expiring.length === 0 ? (
+              <Text style={styles.expEmpty}>कोई प्लान समाप्त नहीं हो रहा 🎉</Text>
+            ) : (
+              expiring.map((e) => (
+                <Pressable
+                  key={e.user_id}
+                  onPress={() => Linking.openURL(`tel:${e.phone}`)}
+                  style={styles.expRow}
+                  testID={`expiring-${e.phone}`}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.expName}>{e.name}</Text>
+                    <Text style={styles.expSub}>+91 {e.phone} · {e.plan_name}</Text>
+                  </View>
+                  <View style={[styles.expBadge, { backgroundColor: e.expired || e.days_left === 0 ? "#FEE2E2" : "#FEF3C7" }]}>
+                    <Text style={[styles.expBadgeTxt, { color: e.expired || e.days_left === 0 ? "#B91C1C" : "#B45309" }]}>
+                      {e.expired ? "Expired" : e.days_left === 0 ? "Today" : `${e.days_left}d left`}
+                    </Text>
+                  </View>
+                  <Ionicons name="call" size={18} color={colors.success} />
+                </Pressable>
+              ))
+            )}
+          </View>
         </ScrollView>
       )}
     </View>
@@ -118,4 +153,15 @@ const useStyles = makeStyles((colors) => ({
   revLabel: { fontSize: 12, color: colors.onBrandTertiary, letterSpacing: 0.5, textTransform: "uppercase" },
   revValue: { fontSize: 28, fontWeight: "800", color: colors.onBrandTertiary, marginTop: 4 },
   revSub: { fontSize: 12, color: colors.onBrandTertiary, marginTop: 4 },
+  expCard: { padding: 16, backgroundColor: colors.surfaceSecondary, borderRadius: 16, borderWidth: 1, borderColor: colors.border, gap: 10 },
+  expHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  expTitle: { flex: 1, fontSize: 15, fontWeight: "800", color: colors.onSurface },
+  expCount: { minWidth: 26, height: 26, borderRadius: 13, paddingHorizontal: 8, alignItems: "center", justifyContent: "center" },
+  expCountTxt: { color: "#FFFFFF", fontWeight: "800", fontSize: 12 },
+  expEmpty: { color: colors.muted, fontSize: 13 },
+  expRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.border },
+  expName: { fontWeight: "700", color: colors.onSurface },
+  expSub: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  expBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
+  expBadgeTxt: { fontSize: 11, fontWeight: "700" },
 }));

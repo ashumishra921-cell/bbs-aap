@@ -1,18 +1,20 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@react-native-vector-icons/ionicons";
 import dayjs from "dayjs";
 
 import { api, clearAuth, loadAuth, User } from "@/src/api";
 import HelplineCard from "@/src/components/HelplineCard";
+import { useToast } from "@/src/components/Toast";
 import { makeStyles, useTheme } from "@/src/theme";
 
 export default function ProfileScreen() {
   const router = useRouter();
   const styles = useStyles();
   const { colors } = useTheme();
+  const toast = useToast();
   const insets = useSafeAreaInsets();
   const [user, setUser] = useState<User | null>(null);
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -34,6 +36,35 @@ export default function ProfileScreen() {
   const logout = async () => {
     await clearAuth();
     router.replace("/");
+  };
+
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const doDelete = async () => {
+    setDeleting(true);
+    try {
+      await api.deleteMyAccount();
+      await clearAuth();
+      toast.show("आपका account delete हो गया", "success");
+      router.replace("/");
+    } catch (e: any) {
+      toast.show(e.message || "Delete failed", "error");
+      setDeleting(false);
+      setConfirmDel(false);
+    }
+  };
+
+  const askDelete = () => {
+    if (Platform.OS === "web") { setConfirmDel(true); return; }
+    Alert.alert(
+      "Account delete करें?",
+      "आपका account, active plan और chat history हमेशा के लिए delete हो जाएंगे। यह वापस नहीं हो सकता।",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: doDelete },
+      ],
+    );
   };
 
   return (
@@ -84,7 +115,29 @@ export default function ProfileScreen() {
           <Ionicons name="log-out-outline" size={20} color={colors.error} />
           <Text style={styles.logoutText}>Logout</Text>
         </Pressable>
+
+        <Pressable onPress={askDelete} style={styles.deleteBtn} testID="delete-account-btn">
+          <Ionicons name="trash-outline" size={16} color={colors.muted} />
+          <Text style={styles.deleteText}>Delete my account</Text>
+        </Pressable>
       </View>
+
+      <Modal visible={confirmDel} transparent animationType="fade" onRequestClose={() => setConfirmDel(false)}>
+        <View style={styles.modalBg}>
+          <View style={styles.dialog}>
+            <Text style={styles.dlgTitle}>Account delete करें?</Text>
+            <Text style={styles.dlgSub}>आपका account, active plan और chat history हमेशा के लिए delete हो जाएंगे। यह वापस नहीं हो सकता।</Text>
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 20 }}>
+              <Pressable onPress={() => setConfirmDel(false)} style={[styles.dlgBtn, { backgroundColor: colors.surfaceTertiary }]} testID="cancel-delete-account">
+                <Text style={{ color: colors.onSurface, fontWeight: "700" }}>Cancel</Text>
+              </Pressable>
+              <Pressable onPress={doDelete} disabled={deleting} style={[styles.dlgBtn, { backgroundColor: colors.error }]} testID="confirm-delete-account">
+                {deleting ? <ActivityIndicator color={colors.onError} /> : <Text style={{ color: colors.onError, fontWeight: "700" }}>Delete</Text>}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -112,4 +165,11 @@ const useStyles = makeStyles((colors) => ({
     backgroundColor: colors.surfaceSecondary,
   },
   logoutText: { color: colors.error, fontWeight: "700" },
+  deleteBtn: { marginTop: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, height: 44 },
+  deleteText: { color: colors.muted, fontSize: 13, fontWeight: "600", textDecorationLine: "underline" },
+  modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: 24 },
+  dialog: { backgroundColor: colors.surfaceSecondary, borderRadius: 20, padding: 20 },
+  dlgTitle: { fontSize: 18, fontWeight: "800", color: colors.onSurface },
+  dlgSub: { color: colors.muted, marginTop: 8, lineHeight: 20 },
+  dlgBtn: { flex: 1, height: 46, borderRadius: 12, alignItems: "center", justifyContent: "center" },
 }));

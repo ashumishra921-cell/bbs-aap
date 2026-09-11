@@ -1,0 +1,38 @@
+{
+  "summary": "Iter 7 — Ticket/Payment/Expiry badges + Delete Account. Backend pytest 15/15 PASSED (test_iter7_badges_expiry_delete.py). Coverage: GET /api/badges — team → {new_tickets:int}; admin/super → {pending_payments, open_tickets, expiring_soon} all ints; subscriber 7222222222 → {expiring_soon:true, days_left<=3}; subscriber 9999999996 → {expiring_soon:false}. GET /api/admin/expiring?days=3 — admin/super 200 with 7222222222 (plan_name='Basic 50', days_left=1, expired=false); team/subscriber → 403; days=40 returns >= days=3 count. DELETE /api/auth/me — super_admin 403; fresh subscriber signup → DELETE 200 → subsequent /auth/me 401 → user gone from /api/subscribers. Payment badge flow: create pending payment as tmp subscriber → admin badges.pending_payments increments by 1; super_admin reject → decrements by 1. Frontend UI (390x844 web preview): (1) Subscriber 7222222222 Home → testID='expiry-banner' visible with text 'प्लान 1 दिन में समाप्त होगा' + subtitle 'बिना रुकावट इंटरनेट के लिए अभी रिचार्ज करें'; tapping banner navigated to /recharge. (2) Subscriber 9999999996 → NO expiry-banner (correctly hidden, 29 days left). (3) Team 9999999997 → Tickets tab shows red numeric badge (screenshot verified '20' rendered on tab icon; matches badges.new_tickets from API). (4) Super Admin 9999999999 → Overview renders testID='expiring-card' with count '1' + row testID='expiring-7222222222' showing 'Expiry Test / +91 7222222222 · Basic 50' with amber '1d left' pill; Payments tab shows RED numeric badge '1' (screenshot verified after seeding one pending payment; correctly reflects badges.pending_payments). (5) Delete account: signed up fresh phone 7333346120 → home → Profile → delete-account-btn → modal (web) → confirm-delete-account → redirected to '/' login screen; re-requesting OTP for same phone returned is_new_user:true confirming full deletion. Regression: subscriber Home/Recharge/Profile, admin Overview/tabs still render.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter7_badges_expiry_delete.py",
+    "/app/test_reports/pytest/iter7_results.xml"
+  ],
+  "action_items": [
+    "None blocking — all 4 iter7 features (ticket badges, payment badges, expiry reminders, delete account) work end-to-end."
+  ],
+  "critical_code_review_comments": [
+    "server.py:869 GET /api/badges correctly branches by role: team → count of (assigned_to=self AND status='assigned') OR (unassigned AND status='open'); admin/super → aggregated counts; subscriber → active-sub expiry within 3 days. Uses expiring_subscriptions() helper (len()) so admin badge and Overview list stay in sync.",
+    "server.py:864 GET /api/admin/expiring?days=N properly RBAC-gated to admin+super_admin via require_role. Returns days_left computed as max(0, diff.days) and expired flag when expires_at<=now, matching FE consumer's amber/red styling in overview.tsx:108-111.",
+    "server.py:892 DELETE /api/auth/me: super_admin blocked (403); subscriber flow cascades sub/payments-pending/chat_messages delete + anonymises invoices/complaints/payments records (user_name='Deleted User', user_phone='deleted') + resets any complaints assigned_to this user (team member deletion path) — good data hygiene. Verified new subscriber signup → delete → re-signup reports is_new_user:true.",
+    "useBadges.ts:15 polls /api/badges every 30s with AppState-aware pause on background — resource-efficient and picks up changes without full refresh; also runs refresh() on foreground return. Good.",
+    "(subscriber)/home.tsx:71-86 expiry-banner is gated on daysLeft<=3 AND sub exists; nav routes to (subscriber)/recharge tab; separate red style when daysLeft===0. Matches spec.",
+    "(subscriber)/profile.tsx:44-56 doDelete calls api.deleteMyAccount → clearAuth → toast → router.replace('/'). On Platform.OS==='web' uses in-app Modal (Alert.alert is unreliable on RN Web) with cancel-delete-account & confirm-delete-account testIDs. Good cross-platform handling.",
+    "(admin)/_layout.tsx:34 tabBarBadge on Payments only shows when pending_payments>0 (avoids showing 0 bubble); same pattern in (team)/_layout.tsx:30 for Tickets. Verified visually.",
+    "(admin)/overview.tsx:86-117 expiring-card iterates api.adminExpiring(3); each row is a testID='expiring-<phone>' pressable that tel:-links the number — nice contact-first UX for renewal calls."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter7_badges_expiry_delete.py",
+    "/app/test_reports/iteration_7.json",
+    "/app/test_reports/pytest/iter7_results.xml"
+  ],
+  "success_rate": {"backend": "100% (15/15 iter7 tests)", "frontend": "100% (all 4 flows: subscriber expiry-banner + gating, team Tickets badge, super_admin Overview expiring-card + Payments tab badge, subscriber delete-account with re-signup as new user)"},
+  "seed_data_creation": "Two tmp subscribers were created via /verify-otp (7-prefixed, TEST_-named) to test pending-payment badge increments and delete-account flow; both were deleted at test end. One additional pending payment was created for demo user 9999999996 to visually verify the admin Payments tab badge in UI, then rejected as super_admin during teardown. Final admin badges after cleanup: {pending_payments:0, open_tickets:1, expiring_soon:1}. Seeded demo users (9999999996-9, 7222222222) and plans untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter7 badges/expiry/delete flow is stable. Key testIDs: expiry-banner (subscriber home), expiring-card + expiring-<phone> (admin overview), delete-account-btn + confirm-delete-account + cancel-delete-account (subscriber profile). Badges API polls every 30s via useBadges hook. To test the Payments badge in future, seed a pending payment via POST /api/payments (upload PNG via /api/payments/upload-screenshot first). Reject via super_admin token to clean up. The 7222222222 expiry test user has a subscription that expires 2 days after seed time — if you run tests weeks after the seed, the sub will be 'expired' (days_left=0 or negative → expired:true) instead of 'expiring' — you may need to re-seed via `db.subscriptions.updateOne(...)`. Run tests: `cd /app && pytest backend/tests/test_iter7_badges_expiry_delete.py -v -n 0`.",
+  "rca_of_issue": "N/A — feature verification only. All 4 iteration-7 acceptance criteria met on first pass with no code changes required."
+}

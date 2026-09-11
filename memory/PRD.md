@@ -57,3 +57,8 @@ Local Internet Service Provider (ISP) management mobile app (Expo React Native +
 - Subscriber Recharge: plan → sheet with UPI QR (upi://pay deep link), UPI ID copy, "Pay via UPI app" (native), screenshot picker (expo-image-picker w/ permission flow + Open Settings), optional UTR → POST /api/payments/upload-screenshot (multipart → Emergent Object Storage, path broadband-solutions-247/uploads/{uid}/{uuid}.ext, meta in db.files) → POST /api/payments (pending). One pending per user. "My Payments" history with status.
 - Admin "Payments" tab: list pending/all with screenshot thumbnails (GET /api/files/{path}?token= for web, Authorization header on native). Super Admin only: Approve (activate_plan → invoice+subscription, payment_mode upi, utr) / Reject with reason. Admin can view only.
 - POST /api/recharge now returns 410 (instant mock disabled).
+
+## Alerts, expiry reminders, delete account
+- GET /api/badges (role-aware): team {new_tickets}, admin/super {pending_payments, open_tickets, expiring_soon}, subscriber {expiring_soon, days_left}. Frontend hook src/hooks/useBadges.ts polls every 30s (foreground only) → tabBarBadge on Team "Tickets" and Admin "Payments" tabs.
+- GET /api/admin/expiring?days=3 → subscribers whose active plan expires within N days; shown on Admin Overview "Expiring in 3 days" card (tap row = call). Subscriber Home shows amber/red expiry banner when ≤3 days left (tap → Recharge).
+- DELETE /api/auth/me → self-delete (super_admin blocked 403): removes user, subscriptions, pending payments, chat; anonymises invoices/complaints/payments; unassigns tickets. Profile: "Delete my account" with confirm (Alert native / modal web) → logout.

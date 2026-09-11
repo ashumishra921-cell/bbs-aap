@@ -67,6 +67,23 @@ export default function SubscriberHome() {
         {loading ? (
           <ActivityIndicator style={{ marginTop: 40 }} color={colors.brandPrimary} />
         ) : sub ? (
+          <>
+          {daysLeft <= 3 && (
+            <Pressable
+              onPress={() => router.push("/(subscriber)/recharge")}
+              style={[styles.expiryBanner, { backgroundColor: daysLeft === 0 ? "#FEE2E2" : "#FEF3C7" }]}
+              testID="expiry-banner"
+            >
+              <Ionicons name="warning" size={22} color={daysLeft === 0 ? "#B91C1C" : "#B45309"} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.expiryTitle, { color: daysLeft === 0 ? "#B91C1C" : "#B45309" }]}>
+                  {daysLeft === 0 ? "प्लान आज समाप्त हो रहा है!" : `प्लान ${daysLeft} दिन में समाप्त होगा`}
+                </Text>
+                <Text style={styles.expirySub}>बिना रुकावट इंटरनेट के लिए अभी रिचार्ज करें</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+            </Pressable>
+          )}
           <View style={styles.planCard} testID="active-plan-card">
             <View style={styles.planHeader}>
               <View>
@@ -103,6 +120,7 @@ export default function SubscriberHome() {
               </Text>
             </View>
           </View>
+          </>
         ) : (
           <View style={styles.emptyCard} testID="no-plan-card">
             <Ionicons name="wifi-outline" size={40} color={colors.muted} />
@@ -145,7 +163,11 @@ function ActionTile({ icon, label, onPress, testID }: { icon: any; label: string
   );
 }
 
+
 const useStyles = makeStyles((colors) => ({
+  expiryBanner: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 14, marginBottom: 12 },
+  expiryTitle: { fontWeight: "800", fontSize: 14 },
+  expirySub: { fontSize: 12, color: colors.muted, marginTop: 2 },
   header: {
     paddingHorizontal: 20,
     paddingBottom: 24,

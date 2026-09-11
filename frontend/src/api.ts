@@ -90,8 +90,12 @@ export const api = {
   deleteTeam: (id: string) => request(`/team/${id}`, { method: "DELETE" }),
 
   subscribers: () => request<any[]>("/subscribers"),
-  createSubscriber: (b: { phone: string; name: string; address?: string }) =>
-    request("/subscribers", { method: "POST", body: JSON.stringify(b) }),
+  createSubscriber: (b: Record<string, any>) =>
+    request<any>("/subscribers", { method: "POST", body: JSON.stringify(b) }),
+  updateSubscriber: (id: string, b: Record<string, any>) =>
+    request<any>(`/subscribers/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
+  assignPlan: (id: string, plan_id: string, payment_mode: string) =>
+    request<any>(`/subscribers/${id}/assign-plan`, { method: "POST", body: JSON.stringify({ plan_id, payment_mode }) }),
   deleteSubscriber: (id: string) => request(`/subscribers/${id}`, { method: "DELETE" }),
   adminMetrics: () => request<any>("/admin/metrics"),
 

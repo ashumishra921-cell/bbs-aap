@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 5 — validated all four issues fixed by main agent: (1) admin & super_admin can CLOSE (PATCH status='resolved') and REOPEN complaints; subscriber PATCH → 403. (2) Overview renders 4 metric cards; taps navigate to correct tabs (metric-tickets→complaints, metric-subscribers→subscribers). (3) Subscribers CRUD by super_admin: create with router_model/router_mac/security_deposit/installation_date/notes/plan+cash → response has activated.invoice + activated.subscription; PATCH updates fields; POST /assign-plan {payment_mode:'free'} → invoice.amount=0.0 + active subscription; invalid plan_id → 404; admin (non-super) POST/PATCH/DELETE → 403 as expected, and admin UI hides add-subscriber-fab / assign-plan-btn / edit-subscriber-btn / delete-subscriber-btn while still allowing search + read-only detail sheet. (4) Timing: GET /api/complaints and /api/invoices created_at now contain a '+00:00' offset (tz-aware) — regex TZ_RE checks passed on all sampled records. Recharge (POST /api/recharge, payment_mode='upi') still works and returns tz-aware created_at. Backend pytest: 17/17 PASSED in /app/backend/tests/test_iter5_admin_close_and_subscribers.py. Frontend UI smoke (390x844, Expo web preview): super_admin overview→tickets nav OK, super_admin add-subscriber via FAB creates+deletes subscriber via web confirm-delete-btn modal OK, admin-close-ticket button closes ticket via UI, admin (non-super) sees no FAB and no assign/edit/delete on detail sheet. All previously-verified flows from iter1-4 (auth, recharge, chat, helpline, OTP resend, auto-assign, team accept) remain intact. RN Web deprecation warnings persist (shadow*→boxShadow, props.pointerEvents→style.pointerEvents) — non-blocking, carried over from iter4.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Carry-over RN Web deprecation warnings (shadow* → boxShadow; props.pointerEvents → style.pointerEvents). Non-blocking."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter5_admin_close_and_subscribers.py",
+    "/app/test_reports/pytest/iter5_results.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional: migrate deprecated RN Web style props (shadow*/pointerEvents)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:22 AsyncIOMotorClient(mongo_url, tz_aware=True) — the fix that made created_at/updated_at tz-aware on read. Combined with Field(default_factory=lambda: datetime.now(timezone.utc)) on Complaint/Invoice/User/ChatMessage models the ISO output is now correctly suffixed with '+00:00'. Verified via TZ_RE against /api/complaints and /api/invoices.",
+    "server.py:511 update_complaint — RBAC OK: role=='subscriber' with body.status → 403 (verified). admin/super_admin bypass the team-only assigned_to check and can flip status to 'resolved' with optional resolution_note.",
+    "server.py:590 create_subscriber — plan_id lookup happens BEFORE user insert; invalid plan → 404 returned without partial writes. Body fields (router_model, router_mac, security_deposit, installation_date, notes) are correctly spread into User via body.model_dump(exclude={phone,name,plan_id,payment_mode}).",
+    "server.py:612 update_subscriber & :625 assign_plan & :636 delete_subscriber all correctly guarded by require_role('super_admin') — admin returns 403 as verified by tests test_admin_cannot_patch_subscriber / test_admin_cannot_create_subscriber / test_admin_cannot_delete_subscriber.",
+    "server.py:380 activate_plan — payment_mode='free' correctly sets invoice.amount=0.0; previous subscriptions marked expired via update_many before inserting the new active one. Verified.",
+    "frontend/app/(admin)/overview.tsx:72-75 — all 4 MetricCard pressables render as web <button> and are tappable; router.push routes to the right (admin) tab. Fixes the reported 'dashboard touch not working'.",
+    "frontend/app/(admin)/subscribers.tsx:213 add-subscriber-fab is conditional on isSuper — admin (role='admin') doesn't see the FAB and, inside the detail sheet (line 234), the assign/edit/delete buttons are also gated by isSuper. Verified in UI smoke.",
+    "frontend/app/(admin)/complaints.tsx:151 — the sheet correctly toggles between admin-close-ticket (for open/assigned/in_progress) and admin-reopen-ticket (for resolved); resolution_note is only sent when closing. Verified via UI + backend PATCH."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter5_admin_close_and_subscribers.py",
+    "/app/test_reports/iteration_5.json",
+    "/app/test_reports/pytest/iter5_results.xml"
+  ],
+  "success_rate": {"backend": "100% (17/17 iter5 tests)", "frontend": "100% for the four flows requested (overview nav, subscribers CRUD by super_admin, admin RBAC hiding, admin close-ticket)"},
+  "seed_data_creation": "TEST-prefixed complaints, invoices and one temporary UI subscriber were created and cleaned up. Test class TestSubscriberCRUD deletes its created subscriber at the end (test_super_admin_can_delete_and_cleanup). The UI-added subscriber (phone 7...) was also deleted via UI confirm-delete-btn. Seeded demo users and plans are untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "iter5 test file works standalone under xdist (`pytest -n 2 --dist loadscope`) because it uses class-level state stored in TestSubscriberCRUD.created_ids and each test is idempotent. New useful testIDs on Subscribers screen: subscriber-search, clear-search, sub-<phone>, add-subscriber-fab, detail-name, assign-plan-btn, edit-subscriber-btn, delete-subscriber-btn, close-detail-btn, sub-phone/sub-name/sub-address/sub-router-model/sub-router-mac/sub-deposit/sub-install-date/sub-notes, form-plan-<id>, form-pay-<cash|upi|free>, save-subscriber-btn, cancel-subscriber-btn, assign-plan-<id>, pay-<cash|upi|free>, confirm-assign-plan, confirm-delete-btn, cancel-delete-btn. Complaints screen adds: admin-resolution-input, admin-close-ticket, admin-reopen-ticket, ac-<ticket_no>, filter-<all|open|resolved>, auto-assign-switch, assign-<phone>. Overview: metric-subscribers, metric-team, metric-plans, metric-tickets, admin-logout, overview-error, overview-retry.",
+  "rca_of_issue": "Original bugs & main-agent fixes (all validated): (a) admin close-ticket — was ONLY exposed for role='team'; main agent added the admin/super_admin branch in the sheet (complaints.tsx:151-161) which calls api.updateComplaint(id, {status:'resolved', resolution_note}); backend server.py:511 already allowed admin/super_admin to PATCH status, no backend change needed. (b) dashboard touch not working — root cause: metric cards previously had onPress but were wrapped in a way that swallowed touch (or missing testID); fix uses Pressable with explicit onPress={() => router.push(...)} + testID (overview.tsx:72-75). Verified all four cards tappable and navigate. (c) subscriber details fields — new Pydantic fields on User model (router_model, router_mac, security_deposit, installation_date, notes) + CreateSubscriberBody / UpdateSubscriberBody + a full modal form in subscribers.tsx (lines 258-328) with plan+payment chips; assign-plan endpoint reused activate_plan helper. (d) timing not proper — root cause: motor was reading created_at as naive datetimes because the collection stored them without tz info OR the client was not tz-aware. Fix: AsyncIOMotorClient(..., tz_aware=True) (server.py:22) combined with Field(default_factory=lambda: datetime.now(timezone.utc)) on every timestamped model means ISO serialization now emits '+00:00'. Regression coverage added in TestTimezoneAwareTimestamps."
+}

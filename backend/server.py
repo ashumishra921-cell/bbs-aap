@@ -19,7 +19,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
+client = AsyncIOMotorClient(mongo_url, tz_aware=True)
 db = client[os.environ['DB_NAME']]
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'dev_secret')
@@ -50,6 +50,11 @@ class User(BaseModel):
     name: str
     role: Role = "subscriber"
     address: Optional[str] = None
+    router_model: Optional[str] = None
+    router_mac: Optional[str] = None
+    security_deposit: Optional[float] = None
+    installation_date: Optional[str] = None
+    notes: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -86,6 +91,7 @@ class Invoice(BaseModel):
     plan_name: str
     amount: float
     upi_id: Optional[str] = None
+    payment_mode: Literal["upi", "cash", "free"] = "upi"
     status: Literal["pending", "paid", "failed"] = "pending"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     paid_at: Optional[datetime] = None
@@ -163,6 +169,28 @@ class CreateSubscriberBody(BaseModel):
     phone: str
     name: str
     address: Optional[str] = None
+    router_model: Optional[str] = None
+    router_mac: Optional[str] = None
+    security_deposit: Optional[float] = None
+    installation_date: Optional[str] = None
+    notes: Optional[str] = None
+    plan_id: Optional[str] = None
+    payment_mode: Literal["cash", "upi", "free"] = "cash"
+
+
+class UpdateSubscriberBody(BaseModel):
+    name: Optional[str] = None
+    address: Optional[str] = None
+    router_model: Optional[str] = None
+    router_mac: Optional[str] = None
+    security_deposit: Optional[float] = None
+    installation_date: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class AssignPlanBody(BaseModel):
+    plan_id: str
+    payment_mode: Literal["cash", "upi", "free"] = "cash"
 
 
 class ChatBody(BaseModel):
@@ -349,12 +377,7 @@ async def my_subscription(user: dict = Depends(get_current_user)):
     return sub
 
 
-@api_router.post("/recharge")
-async def recharge(body: RechargeBody, user: dict = Depends(get_current_user)):
-    plan = await db.plans.find_one({"id": body.plan_id}, {"_id": 0})
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
-
+async def activate_plan(user: dict, plan: dict, payment_mode: str, upi_id: Optional[str] = None) -> dict:
     now = datetime.now(timezone.utc)
     invoice_no = f"INV-{now.strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}"
     invoice = Invoice(
@@ -364,14 +387,13 @@ async def recharge(body: RechargeBody, user: dict = Depends(get_current_user)):
         user_phone=user["phone"],
         plan_id=plan["id"],
         plan_name=plan["name"],
-        amount=plan["price"],
-        upi_id=body.upi_id,
+        amount=0.0 if payment_mode == "free" else plan["price"],
+        upi_id=upi_id,
+        payment_mode=payment_mode,
         status="paid",
         paid_at=now,
     )
     await db.invoices.insert_one(invoice.model_dump())
-
-    # Expire old active subs
     await db.subscriptions.update_many({"user_id": user["id"], "status": "active"}, {"$set": {"status": "expired"}})
     sub = Subscription(
         user_id=user["id"],
@@ -386,6 +408,14 @@ async def recharge(body: RechargeBody, user: dict = Depends(get_current_user)):
     )
     await db.subscriptions.insert_one(sub.model_dump())
     return {"invoice": invoice.model_dump(), "subscription": sub.model_dump()}
+
+
+@api_router.post("/recharge")
+async def recharge(body: RechargeBody, user: dict = Depends(get_current_user)):
+    plan = await db.plans.find_one({"id": body.plan_id}, {"_id": 0})
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return await activate_plan(user, plan, "upi", body.upi_id)
 
 
 # ---------------------- Invoices ----------------------
@@ -564,9 +594,43 @@ async def create_subscriber(body: CreateSubscriberBody, user: dict = Depends(req
         raise HTTPException(status_code=400, detail="Name is required")
     if await db.users.find_one({"phone": phone}):
         raise HTTPException(status_code=400, detail="Phone already exists")
-    new_user = User(phone=phone, name=body.name.strip(), role="subscriber", address=body.address)
-    await db.users.insert_one(new_user.model_dump())
-    return new_user.model_dump()
+    plan = None
+    if body.plan_id:
+        plan = await db.plans.find_one({"id": body.plan_id}, {"_id": 0})
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan not found")
+    fields = body.model_dump(exclude={"phone", "name", "plan_id", "payment_mode"})
+    new_user = User(phone=phone, name=body.name.strip(), role="subscriber", **fields)
+    doc = new_user.model_dump()
+    await db.users.insert_one(doc)
+    result = clean(doc)
+    if plan:
+        result["activated"] = await activate_plan(result, plan, body.payment_mode)
+    return result
+
+
+@api_router.patch("/subscribers/{uid}")
+async def update_subscriber(uid: str, body: UpdateSubscriberBody, user: dict = Depends(require_role("super_admin"))):
+    target = await db.users.find_one({"id": uid, "role": "subscriber"}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Subscriber not found")
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "name" in updates and not updates["name"].strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    if updates:
+        await db.users.update_one({"id": uid}, {"$set": updates})
+    return clean(await db.users.find_one({"id": uid}, {"_id": 0}))
+
+
+@api_router.post("/subscribers/{uid}/assign-plan")
+async def assign_plan(uid: str, body: AssignPlanBody, user: dict = Depends(require_role("super_admin"))):
+    target = await db.users.find_one({"id": uid, "role": "subscriber"}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Subscriber not found")
+    plan = await db.plans.find_one({"id": body.plan_id}, {"_id": 0})
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return await activate_plan(target, plan, body.payment_mode)
 
 
 @api_router.delete("/subscribers/{uid}")

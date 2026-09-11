@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@react-native-vector-icons/ionicons";
@@ -16,13 +16,17 @@ export default function AdminOverview() {
   const [metrics, setMetrics] = useState<any | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       const { user } = await loadAuth();
       setUser(user);
       const m = await api.adminMetrics();
       setMetrics(m);
+    } catch (e: any) {
+      setError(e.message || "Failed to load");
     } finally {
       setLoading(false);
     }
@@ -51,13 +55,24 @@ export default function AdminOverview() {
 
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.brandPrimary} />
+      ) : error || !metrics ? (
+        <View style={styles.errorBox} testID="overview-error">
+          <Ionicons name="cloud-offline-outline" size={40} color={colors.muted} />
+          <Text style={{ color: colors.muted, marginTop: 8, textAlign: "center" }}>{error || "डेटा लोड नहीं हुआ"}</Text>
+          <Pressable onPress={() => { setLoading(true); load(); }} style={[styles.retryBtn, { backgroundColor: colors.brandPrimary }]} testID="overview-retry">
+            <Text style={{ color: "#FFFFFF", fontWeight: "700" }}>Retry</Text>
+          </Pressable>
+        </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
+        <ScrollView
+          contentContainerStyle={{ padding: 16, gap: 12 }}
+          refreshControl={<RefreshControl refreshing={false} onRefresh={load} />}
+        >
           <View style={styles.grid}>
-            <MetricCard label="Subscribers" value={metrics.subscribers} icon="people" tint={colors.info} />
-            <MetricCard label="Team" value={metrics.team_members} icon="briefcase" tint={colors.warning} />
-            <MetricCard label="Active Plans" value={metrics.active_subscriptions} icon="wifi" tint={colors.brandPrimary} />
-            <MetricCard label="Open Tickets" value={metrics.open_complaints} icon="alert-circle" tint={colors.error} />
+            <MetricCard label="Subscribers" value={metrics.subscribers} icon="people" tint={colors.info} onPress={() => router.push("/(admin)/subscribers")} testID="metric-subscribers" />
+            <MetricCard label="Team" value={metrics.team_members} icon="briefcase" tint={colors.warning} onPress={() => router.push("/(admin)/team")} testID="metric-team" />
+            <MetricCard label="Active Plans" value={metrics.active_subscriptions} icon="wifi" tint={colors.brandPrimary} onPress={() => router.push("/(admin)/subscribers")} testID="metric-plans" />
+            <MetricCard label="Open Tickets" value={metrics.open_complaints} icon="alert-circle" tint={colors.error} onPress={() => router.push("/(admin)/complaints")} testID="metric-tickets" />
           </View>
 
           <View style={styles.revenueCard}>
@@ -71,16 +86,16 @@ export default function AdminOverview() {
   );
 }
 
-function MetricCard({ label, value, icon, tint }: any) {
+function MetricCard({ label, value, icon, tint, onPress, testID }: any) {
   const styles = useStyles();
   return (
-    <View style={styles.metricCard}>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.metricCard, { opacity: pressed ? 0.7 : 1 }]} testID={testID}>
       <View style={[styles.metricIcon, { backgroundColor: tint + "20" }]}>
         <Ionicons name={icon} size={20} color={tint} />
       </View>
       <Text style={styles.metricValue}>{value}</Text>
       <Text style={styles.metricLabel}>{label}</Text>
-    </View>
+    </Pressable>
   );
 }
 
@@ -90,6 +105,8 @@ const useStyles = makeStyles((colors) => ({
   name: { color: "#FFFFFF", fontSize: 22, fontWeight: "800", marginTop: 2 },
   logoutBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  errorBox: { alignItems: "center", padding: 32, marginTop: 40 },
+  retryBtn: { marginTop: 16, paddingHorizontal: 24, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   metricCard: {
     width: "47%", padding: 16, backgroundColor: colors.surfaceSecondary,
     borderRadius: 14, borderWidth: 1, borderColor: colors.border,

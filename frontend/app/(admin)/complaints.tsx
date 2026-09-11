@@ -1,6 +1,6 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@react-native-vector-icons/ionicons";
 import dayjs from "dayjs";
@@ -27,6 +27,8 @@ export default function AdminComplaints() {
   const [selected, setSelected] = useState<any | null>(null);
   const [filter, setFilter] = useState<"all" | "open" | "resolved">("all");
   const [autoAssign, setAutoAssign] = useState<boolean>(true);
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -59,6 +61,18 @@ export default function AdminComplaints() {
       setSelected(null);
       load();
     } catch (e: any) { toast.show(e.message, "error"); }
+  };
+
+  const setStatus = async (status: string) => {
+    if (!selected) return;
+    setSaving(true);
+    try {
+      await api.updateComplaint(selected.id, { status, resolution_note: status === "resolved" && note.trim() ? note.trim() : undefined });
+      toast.show(status === "resolved" ? "Ticket closed ✓" : "Ticket reopened", "success");
+      setSelected(null); setNote("");
+      load();
+    } catch (e: any) { toast.show(e.message, "error"); }
+    finally { setSaving(false); }
   };
 
   return (
@@ -99,7 +113,7 @@ export default function AdminComplaints() {
           {filtered.map((c) => {
             const s = STATUS_COLORS[c.status];
             return (
-              <Pressable key={c.id} onPress={() => setSelected(c)} style={styles.card} testID={`ac-${c.ticket_no}`}>
+              <Pressable key={c.id} onPress={() => { setSelected(c); setNote(c.resolution_note || ""); }} style={styles.card} testID={`ac-${c.ticket_no}`}>
                 <View style={styles.cardTop}>
                   <Text style={styles.ticket}>{c.ticket_no}</Text>
                   <View style={[styles.badge, { backgroundColor: s.bg }]}>
@@ -121,8 +135,31 @@ export default function AdminComplaints() {
           <View style={[styles.sheet, { paddingBottom: insets.bottom + 24 }]}>
             <View style={styles.grabber} />
             <Text style={styles.modalTitle}>{selected?.title}</Text>
-            <Text style={styles.modalSub}>{selected?.ticket_no} · {selected?.user_name}</Text>
+            <Text style={styles.modalSub}>{selected?.ticket_no} · {selected?.user_name} · {STATUS_COLORS[selected?.status]?.label}</Text>
             <Text style={styles.desc}>{selected?.description}</Text>
+
+            <Text style={styles.label}>Resolution / Close Note</Text>
+            <TextInput
+              testID="admin-resolution-input"
+              placeholder="समाधान लिखें (optional)"
+              placeholderTextColor={colors.muted}
+              value={note}
+              onChangeText={setNote}
+              style={styles.noteInput}
+            />
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+              {selected?.status !== "resolved" ? (
+                <Pressable onPress={() => setStatus("resolved")} disabled={saving} style={[styles.statusBtn, { backgroundColor: colors.success }]} testID="admin-close-ticket">
+                  <Ionicons name="checkmark-done" size={18} color="#FFFFFF" />
+                  <Text style={styles.statusTxt}>Close Ticket</Text>
+                </Pressable>
+              ) : (
+                <Pressable onPress={() => setStatus(selected?.assigned_to ? "assigned" : "open")} disabled={saving} style={[styles.statusBtn, { backgroundColor: colors.warning }]} testID="admin-reopen-ticket">
+                  <Ionicons name="refresh" size={18} color="#FFFFFF" />
+                  <Text style={styles.statusTxt}>Reopen</Text>
+                </Pressable>
+              )}
+            </View>
 
             <Text style={styles.label}>Assign to Team Member</Text>
             {team.length === 0 ? (
@@ -162,6 +199,9 @@ const useStyles = makeStyles((colors) => ({
   autoRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, borderRadius: 12, backgroundColor: colors.brandTertiary },
   autoTitle: { fontSize: 13, fontWeight: "700", color: colors.onBrandTertiary },
   autoSub: { fontSize: 11, color: colors.onBrandTertiary, marginTop: 1 },
+  noteInput: { height: 46, borderRadius: 12, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, color: colors.onSurface },
+  statusBtn: { flex: 1, height: 46, borderRadius: 12, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center" },
+  statusTxt: { color: "#FFFFFF", fontWeight: "700" },
   chip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, flexShrink: 0 },
   chipTxt: { fontSize: 11, fontWeight: "700", color: colors.onSurface },
   card: { backgroundColor: colors.surfaceSecondary, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: colors.border, gap: 4 },

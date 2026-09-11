@@ -407,6 +407,40 @@ async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
 
 
 # ---------------------- Complaints ----------------------
+async def get_setting(key: str, default):
+    doc = await db.settings.find_one({"key": key}, {"_id": 0})
+    return doc["value"] if doc else default
+
+
+async def pick_least_loaded_technician() -> Optional[dict]:
+    techs = await db.users.find({"role": "team"}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    if not techs:
+        return None
+    loads = {t["id"]: 0 for t in techs}
+    async for row in db.complaints.aggregate([
+        {"$match": {"assigned_to": {"$in": list(loads)}, "status": {"$in": ["assigned", "in_progress"]}}},
+        {"$group": {"_id": "$assigned_to", "n": {"$sum": 1}}},
+    ]):
+        loads[row["_id"]] = row["n"]
+    return min(techs, key=lambda t: loads[t["id"]])
+
+
+@api_router.get("/settings")
+async def get_settings(user: dict = Depends(require_role("admin", "super_admin"))):
+    return {"auto_assign": await get_setting("auto_assign", True)}
+
+
+class SettingsBody(BaseModel):
+    auto_assign: Optional[bool] = None
+
+
+@api_router.patch("/settings")
+async def update_settings(body: SettingsBody, user: dict = Depends(require_role("admin", "super_admin"))):
+    if body.auto_assign is not None:
+        await db.settings.update_one({"key": "auto_assign"}, {"$set": {"value": body.auto_assign}}, upsert=True)
+    return {"auto_assign": await get_setting("auto_assign", True)}
+
+
 @api_router.post("/complaints")
 async def create_complaint(body: CreateComplaintBody, user: dict = Depends(get_current_user)):
     now = datetime.now(timezone.utc)
@@ -421,8 +455,13 @@ async def create_complaint(body: CreateComplaintBody, user: dict = Depends(get_c
         priority=body.priority,
         status="open",
     )
-    await db.complaints.insert_one(c.model_dump())
-    return c.model_dump()
+    doc = c.model_dump()
+    if await get_setting("auto_assign", True):
+        tech = await pick_least_loaded_technician()
+        if tech:
+            doc.update({"assigned_to": tech["id"], "assigned_to_name": tech["name"], "status": "assigned", "auto_assigned": True})
+    await db.complaints.insert_one(doc)
+    return clean(doc)
 
 
 @api_router.get("/complaints")
@@ -431,7 +470,8 @@ async def list_complaints(user: dict = Depends(get_current_user)):
     if role == "subscriber":
         q = {"user_id": user["id"]}
     elif role == "team":
-        q = {"assigned_to": user["id"]}
+        # own tickets + unassigned open tickets (any technician can accept)
+        q = {"$or": [{"assigned_to": user["id"]}, {"assigned_to": None, "status": "open"}]}
     else:
         q = {}
     items = await db.complaints.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
@@ -446,20 +486,25 @@ async def update_complaint(cid: str, body: UpdateComplaintBody, user: dict = Dep
     role = user["role"]
     updates = {}
     if body.assigned_to is not None:
-        if role not in ("admin", "super_admin"):
+        is_self_claim = role == "team" and body.assigned_to == user["id"] and not c.get("assigned_to")
+        if role not in ("admin", "super_admin") and not is_self_claim:
             raise HTTPException(status_code=403, detail="Only admin can assign")
         member = await db.users.find_one({"id": body.assigned_to}, {"_id": 0})
         if not member or member["role"] != "team":
             raise HTTPException(status_code=400, detail="Invalid team member")
         updates["assigned_to"] = member["id"]
         updates["assigned_to_name"] = member["name"]
+        updates["auto_assigned"] = False
         if not body.status:
             updates["status"] = "assigned"
     if body.status is not None:
         if role == "subscriber":
             raise HTTPException(status_code=403, detail="Forbidden")
-        if role == "team" and c.get("assigned_to") != user["id"]:
+        if role == "team" and c.get("assigned_to") not in (None, user["id"]):
             raise HTTPException(status_code=403, detail="Not your ticket")
+        if role == "team" and not c.get("assigned_to"):
+            updates["assigned_to"] = user["id"]
+            updates["assigned_to_name"] = user["name"]
         updates["status"] = body.status
     if body.resolution_note is not None:
         updates["resolution_note"] = body.resolution_note

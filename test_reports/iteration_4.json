@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 4 re-verification of iter3 auto-assign + team accept flow. Backend: 17/17 pytest cases PASSED (/app/backend/tests/test_iter3_auto_assign.py) covering (a) GET/PATCH /api/settings RBAC — admin/super_admin 200, team/subscriber 403; (b) auto_assign=true → new complaint stamped status='assigned' + assigned_to (a team user) + auto_assigned=true, assigned tech sees ticket in GET /api/complaints; (c) auto_assign=false → complaint stays status='open'+assigned_to=null, team GET /api/complaints returns it, team PATCH assigned_to=self succeeds (status flips to 'assigned'), team PATCH assigned_to=admin_id → 403, team self-claim on ticket already owned by another tech → 403; (d) team PATCH status in_progress→resolved with resolution_note works; (e) subscriber sees only own complaints and cannot change status; (f) admin manual assign still works with auto_assigned=false stamp. auto_assign restored to true at end. Frontend smoke (390x844): subscriber (9999999996) logs in, new-complaint-fab opens the modal with title/description/priority + Submit; team screen showed filter-new/filter-active/filter-resolved segments and ticket cards. Full team-side accept/in_progress/resolve UI flow was already fully covered and verified in iteration_3 (see iteration_3.json).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Carry-over RN Web deprecation warnings (shadow* → boxShadow; props.pointerEvents → style.pointerEvents). Non-blocking."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter3_auto_assign.py",
+    "/app/test_reports/pytest/iter4_results.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional: (a) migrate deprecated RN Web shadow*/pointerEvents style props; (b) add explicit testIDs on the subscriber new-complaint modal fields (e.g. complaint-title-input / complaint-description-input / submit-complaint) — currently only new-complaint-fab is easy to target from automation."
+  ],
+  "critical_code_review_comments": [
+    "server.py:415 pick_least_loaded_technician — correct aggregation over {assigned,in_progress}; verified live spread across multiple techs.",
+    "server.py:459 create_complaint — auto-assign default True (get_setting fallback), auto_assigned flag only set on auto path. Correct.",
+    "server.py:481 update_complaint — self-claim only allowed when ticket has no assignee (`not c.get('assigned_to')`); prevents stealing (403). auto_assigned reset to false on manual assign.",
+    "server.py:467 list_complaints — team gets `own OR (unassigned AND open)` — this is the core bug fix and is verified by the pytest suite.",
+    "server.py:428/437 GET/PATCH /api/settings — proper RBAC via require_role('admin','super_admin'), upsert on write.",
+    "Test infra fix applied: /app/backend/tests/test_iter3_auto_assign.py had a pytest-xdist race (TestAutoAssignOff.disable_auto_assign on one worker toggled the shared server flag while TestAutoAssignOn on the other worker was creating a complaint, causing 3 sporadic FAILs). Added an autouse module-level FileLock (/tmp/iter3_auto_assign.lock) to serialize this module across xdist workers — no changes to pytest.ini or addopts (-n 2 --dist loadscope preserved). 17/17 now green under the mandated parallel config."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter3_auto_assign.py",
+    "/app/test_reports/iteration_4.json",
+    "/app/test_reports/pytest/iter4_results.xml"
+  ],
+  "success_rate": {"backend": "100% (17/17 iter3 tests under -n 2 --dist loadscope)", "frontend": "100% for previously verified flows (iter3); iter4 smoke only re-confirmed subscriber login + new-complaint modal open + team segments render — deeper UI regression not repeated since app code untouched since iter3"},
+  "seed_data_creation": "auto_assign restored to True by module-scoped autouse teardown. TEST_ prefixed complaints created by pytest are harmless demo data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter3 test file now uses filelock to serialize across xdist workers — pytest.ini stays at `-n 2 --dist loadscope`; no need to run with -n 0. All frontend testIDs listed in iteration_3.json context_for_next_testing_agent remain valid. Missing subscriber-side testIDs on the new-complaint modal (title-input/description-input/submit-complaint) — if a future test needs to submit a complaint via UI it must use role='button' + text 'Submit' selectors or the main agent should add explicit testIDs."
+}

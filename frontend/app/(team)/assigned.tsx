@@ -5,12 +5,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@react-native-vector-icons/ionicons";
 import dayjs from "dayjs";
 
-import { api } from "@/src/api";
+import { api, loadAuth } from "@/src/api";
 import { useToast } from "@/src/components/Toast";
 import { makeStyles, useTheme } from "@/src/theme";
 
 const STATUS_COLORS: Record<string, { bg: string; text: string; label: string }> = {
-  open: { bg: "#FEF3C7", text: "#B45309", label: "Open" },
+  open: { bg: "#FEF3C7", text: "#B45309", label: "New" },
   assigned: { bg: "#DBEAFE", text: "#1D4ED8", label: "Assigned" },
   in_progress: { bg: "#E0E7FF", text: "#4338CA", label: "In Progress" },
   resolved: { bg: "#D1FAE5", text: "#065F46", label: "Resolved" },
@@ -22,14 +22,17 @@ export default function TeamAssigned() {
   const toast = useToast();
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<any[]>([]);
+  const [meId, setMeId] = useState<string>("");
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"active" | "resolved">("active");
+  const [filter, setFilter] = useState<"new" | "active" | "resolved">("active");
   const [selected, setSelected] = useState<any | null>(null);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
+      const { user } = await loadAuth();
+      setMeId(user?.id || "");
       const c = await api.complaints();
       setItems(c);
     } finally {
@@ -39,7 +42,25 @@ export default function TeamAssigned() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const filtered = items.filter((c) => (filter === "active" ? c.status !== "resolved" : c.status === "resolved"));
+  const newCount = items.filter((c) => !c.assigned_to).length;
+  const filtered = items.filter((c) =>
+    filter === "new" ? !c.assigned_to : filter === "active" ? !!c.assigned_to && c.status !== "resolved" : c.status === "resolved",
+  );
+
+  const accept = async (c: any) => {
+    setSaving(true);
+    try {
+      await api.updateComplaint(c.id, { assigned_to: meId });
+      toast.show("टिकट स्वीकार किया ✓", "success");
+      setSelected(null);
+      setFilter("active");
+      load();
+    } catch (e: any) {
+      toast.show(e.message, "error");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const updateStatus = async (status: string) => {
     if (!selected) return;
@@ -59,16 +80,18 @@ export default function TeamAssigned() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <Text style={styles.headerTitle}>Assigned Tickets</Text>
+        <Text style={styles.headerTitle}>Tickets</Text>
         <View style={styles.segment}>
-          {(["active", "resolved"] as const).map((f) => (
+          {(["new", "active", "resolved"] as const).map((f) => (
             <Pressable
               key={f}
               testID={`filter-${f}`}
               onPress={() => setFilter(f)}
               style={[styles.segItem, filter === f && { backgroundColor: colors.brandPrimary }]}
             >
-              <Text style={[styles.segText, filter === f && { color: "#FFFFFF" }]}>{f.toUpperCase()}</Text>
+              <Text style={[styles.segText, filter === f && { color: "#FFFFFF" }]}>
+                {f === "new" ? `NEW${newCount ? ` (${newCount})` : ""}` : f.toUpperCase()}
+              </Text>
             </Pressable>
           ))}
         </View>
@@ -79,7 +102,9 @@ export default function TeamAssigned() {
       ) : filtered.length === 0 ? (
         <View style={styles.empty}>
           <Ionicons name="briefcase-outline" size={60} color={colors.muted} />
-          <Text style={{ color: colors.muted, marginTop: 8 }}>कोई टिकट नहीं</Text>
+          <Text style={{ color: colors.muted, marginTop: 8 }}>
+            {filter === "new" ? "कोई नया टिकट नहीं" : filter === "active" ? "कोई सक्रिय टिकट नहीं" : "कोई हल किया टिकट नहीं"}
+          </Text>
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
@@ -104,7 +129,24 @@ export default function TeamAssigned() {
                   <Ionicons name="person" size={12} color={colors.muted} />
                   <Text style={styles.userTxt}>{c.user_name} · {c.user_phone}</Text>
                 </View>
+                {c.auto_assigned && (
+                  <View style={styles.userRow}>
+                    <Ionicons name="flash" size={12} color={colors.brandPrimary} />
+                    <Text style={[styles.userTxt, { color: colors.brandPrimary }]}>Auto-assigned to you</Text>
+                  </View>
+                )}
                 <Text style={styles.date}>{dayjs(c.created_at).format("DD MMM, hh:mm A")}</Text>
+                {!c.assigned_to && (
+                  <Pressable
+                    onPress={() => accept(c)}
+                    disabled={saving}
+                    style={[styles.acceptBtn, { backgroundColor: colors.brandPrimary }]}
+                    testID={`accept-${c.ticket_no}`}
+                  >
+                    <Ionicons name="hand-right" size={16} color="#FFFFFF" />
+                    <Text style={styles.actionText}>Accept Ticket</Text>
+                  </Pressable>
+                )}
               </Pressable>
             );
           })}
@@ -130,6 +172,16 @@ export default function TeamAssigned() {
               style={styles.input}
             />
             <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+              {!selected?.assigned_to && (
+                <Pressable
+                  onPress={() => accept(selected)}
+                  disabled={saving}
+                  style={[styles.actionBtn, { backgroundColor: colors.brandPrimary }]}
+                  testID="accept-ticket"
+                >
+                  <Text style={styles.actionText}>Accept</Text>
+                </Pressable>
+              )}
               <Pressable
                 onPress={() => updateStatus("in_progress")}
                 disabled={saving}
@@ -183,6 +235,7 @@ const useStyles = makeStyles((colors) => ({
   label: { fontSize: 12, fontWeight: "700", color: colors.onSurface, marginTop: 16, marginBottom: 6 },
   input: { minHeight: 80, borderRadius: 12, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border, padding: 12, textAlignVertical: "top", color: colors.onSurface },
   actionBtn: { flex: 1, height: 46, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  acceptBtn: { marginTop: 8, height: 42, borderRadius: 10, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center" },
   actionText: { color: "#FFFFFF", fontWeight: "700" },
   cancel: { marginTop: 8, height: 40, alignItems: "center", justifyContent: "center" },
 }));

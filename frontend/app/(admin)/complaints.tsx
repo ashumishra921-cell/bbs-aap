@@ -1,6 +1,6 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@react-native-vector-icons/ionicons";
 import dayjs from "dayjs";
@@ -26,14 +26,24 @@ export default function AdminComplaints() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<any | null>(null);
   const [filter, setFilter] = useState<"all" | "open" | "resolved">("all");
+  const [autoAssign, setAutoAssign] = useState<boolean>(true);
 
   const load = useCallback(async () => {
     try {
-      const [c, t] = await Promise.all([api.complaints(), api.team()]);
+      const [c, t, s] = await Promise.all([api.complaints(), api.team(), api.settings()]);
       setItems(c);
       setTeam(t.filter((x: any) => x.role === "team"));
+      setAutoAssign(s.auto_assign);
     } finally { setLoading(false); }
   }, []);
+
+  const toggleAutoAssign = async (v: boolean) => {
+    setAutoAssign(v);
+    try {
+      await api.updateSettings({ auto_assign: v });
+      toast.show(v ? "Auto-assign ON" : "Auto-assign OFF", "success");
+    } catch (e: any) { setAutoAssign(!v); toast.show(e.message, "error"); }
+  };
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -55,6 +65,20 @@ export default function AdminComplaints() {
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.title}>All Complaints</Text>
+        <View style={styles.autoRow} testID="auto-assign-row">
+          <Ionicons name="flash" size={16} color={colors.brandPrimary} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.autoTitle}>Auto-assign to technician</Text>
+            <Text style={styles.autoSub}>नई शिकायत सबसे कम व्यस्त टेक्नीशियन को अपने आप जाएगी</Text>
+          </View>
+          <Switch
+            testID="auto-assign-switch"
+            value={autoAssign}
+            onValueChange={toggleAutoAssign}
+            trackColor={{ true: colors.brandPrimary, false: colors.borderStrong }}
+            thumbColor="#FFFFFF"
+          />
+        </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 16 }}>
           {(["all", "open", "resolved"] as const).map((f) => (
             <Pressable
@@ -135,6 +159,9 @@ export default function AdminComplaints() {
 const useStyles = makeStyles((colors) => ({
   header: { paddingHorizontal: 20, paddingBottom: 12, backgroundColor: colors.surfaceSecondary, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 12 },
   title: { fontSize: 22, fontWeight: "800", color: colors.onSurface },
+  autoRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, borderRadius: 12, backgroundColor: colors.brandTertiary },
+  autoTitle: { fontSize: 13, fontWeight: "700", color: colors.onBrandTertiary },
+  autoSub: { fontSize: 11, color: colors.onBrandTertiary, marginTop: 1 },
   chip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, flexShrink: 0 },
   chipTxt: { fontSize: 11, fontWeight: "700", color: colors.onSurface },
   card: { backgroundColor: colors.surfaceSecondary, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: colors.border, gap: 4 },

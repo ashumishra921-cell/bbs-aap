@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 3 (auto-assign complaint + team self-claim + admin settings toggle) fully verified. Backend: 17/17 pytest cases PASSED at /app/backend/tests/test_iter3_auto_assign.py — RBAC on GET/PATCH /api/settings (admin/super_admin 200, team/subscriber 403), auto_assign=true path stamps status='assigned' + assigned_to (a team member) + auto_assigned=true, assigned technician sees ticket in GET /api/complaints. auto_assign=false path leaves status='open'+assigned_to=null, team sees unassigned in list, team self-claim PATCH assigned_to=self succeeds and flips status to 'assigned', team attempting to assign to another user 403, team attempting self-claim on a ticket already owned by another tech 403 ('Not your ticket'). Team can PATCH status in_progress→resolved with resolution_note. Admin manual assign still works with auto_assigned=false stamp. Frontend (Expo web, 390x844): admin (9999999998) → /(admin)/complaints shows auto-assign-row + auto-assign-switch; toggling shows 'Auto-assign OFF/ON' toast and persists across reload via GET /api/settings. Subscriber (9999999996) sees own complaints list with assigned_to_name + resolution_note surfaced. Team (9999999997) → /(team)/assigned shows filter-new/filter-active/filter-resolved; NEW segment lists 3 unassigned tickets each with accept-<ticket_no> Accept Ticket button; tapping Accept triggers Hindi toast 'टिकट स्वीकार किया' and moves ticket to ACTIVE segment; opening ticket → mark-in-progress → resolution-input → mark-resolved works, ticket lands in RESOLVED segment. 'Auto-assigned to you' label surfaces on cards with auto_assigned=true. auto_assign restored to true at end of run.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Carry-over RN Web deprecation warnings: 'shadow*' style props deprecated (use boxShadow); props.pointerEvents deprecated (use style.pointerEvents). Non-blocking, same as iterations 1 & 2."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter3_auto_assign.py",
+    "/app/test_reports/pytest/iter3_results.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional (carry-over): migrate deprecated shadow*/pointerEvents style props to boxShadow/style.pointerEvents to silence RN Web warnings."
+  ],
+  "critical_code_review_comments": [
+    "pick_least_loaded_technician() uses aggregation over complaints where status ∈ {assigned, in_progress}; ties broken by insertion order via min() — correct load-balancing behaviour observed live (assignments spread across Ravi, Kuldeep, Himanshu, TEST Team Guy).",
+    "create_complaint auto-assign gated by get_setting('auto_assign', True) — default True on empty DB, correct. auto_assigned=true stamped only on auto-path.",
+    "update_complaint self-claim rule: `is_self_claim = role=='team' and body.assigned_to==user.id and not c.get('assigned_to')` — prevents stealing from another tech (verified with 403 in test). auto_assigned reset to false on manual assign (regression check).",
+    "GET /api/complaints for team returns own + unassigned open tickets (`$or` query) — technicians can now Accept from a pool, which is the core bug fix.",
+    "PATCH /api/settings uses upsert, so setting persists even before any admin ever touched it. GET default True — safe.",
+    "Frontend admin complaints.tsx: optimistic setAutoAssign then rollback on error is correct UX. testIDs (auto-assign-row, auto-assign-switch, filter-*, ac-<ticket>, assign-<phone>) all present and functional.",
+    "Frontend team assigned.tsx: filter='new' filters where !c.assigned_to; accept() calls updateComplaint with assigned_to=meId then setFilter('active') + reload — verified moves ticket correctly. testIDs (filter-new/active/resolved, ticket-<no>, accept-<no>, accept-ticket, mark-in-progress, mark-resolved, resolution-input) all present.",
+    "One data-quality note (non-blocking): filter-new count badge shows total unassigned tickets in `items` (own or otherwise). Since team's GET /api/complaints only returns own + unassigned-open, this is accurate. OK.",
+    "Minor: STATUS_COLORS.open label is 'New' on team screen and 'Open' on admin screen — intentional per-role wording, but worth noting for design consistency review."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter3_auto_assign.py",
+    "/app/test_reports/iteration_3.json",
+    "/app/test_reports/pytest/iter3_results.xml"
+  ],
+  "success_rate": {"backend": "100% (17/17 iter3 + 16/16 iter2 + 20/20 iter1)", "frontend": "100% (all acceptance points verified: admin toggle+persist, subscriber create, team NEW→Accept→ACTIVE→In Progress→Resolve→RESOLVED, Auto-assigned label)"},
+  "seed_data_creation": "During tests: created 'TEST_Tech B' (phone 9876500011) briefly then deleted for the 'cannot self-claim someone else's ticket' assertion. Multiple TEST_-prefixed complaints (TEST_auto_wifi_slow, TEST_unassigned_router_reboot, TEST_other_claim_check, TEST_owned_by_b, TEST_flow_check, TEST_manual_assign) were created via the subscriber and left in DB — harmless demo data. auto_assign restored to true at end.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "DB now has 4 team users (Ravi 9999999997 + Kuldeep 8826004211 + Himanshu 8826004213 + TEST Team Guy 7000968272) and 2 admins beyond the seed (ASHU MISHRA 9312004211, TEST New Admin 7200968273). Auto-assign will NOT always land on Ravi — it goes to the least-loaded technician. Any future test that expects a specific tech should look up the assigned_to id and log in as that user (see test_iter3_auto_assign.py::TestAutoAssignOn for the pattern). Settings live at db.settings key='auto_assign'. Frontend testIDs verified: phone-input, request-otp-btn, otp-input, verify-otp-btn, admin-logout, auto-assign-row, auto-assign-switch, filter-all/open/resolved (admin), filter-new/active/resolved (team), ticket-<no>, accept-<no>, accept-ticket, mark-in-progress, mark-resolved, resolution-input, ac-<no>, assign-<phone>, complaint-<no>, new-complaint-fab, toast-success. auto_assign confirmed=true at end of run."
+}

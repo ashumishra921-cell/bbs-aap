@@ -76,6 +76,9 @@ export const api = {
   invoice: (id: string) => request<any>(`/invoices/${id}`),
 
   complaints: () => request<any[]>("/complaints"),
+  settings: () => request<{ auto_assign: boolean }>("/settings"),
+  updateSettings: (b: { auto_assign: boolean }) =>
+    request<{ auto_assign: boolean }>("/settings", { method: "PATCH", body: JSON.stringify(b) }),
   createComplaint: (b: { title: string; description: string; priority?: string }) =>
     request("/complaints", { method: "POST", body: JSON.stringify(b) }),
   updateComplaint: (id: string, b: any) =>

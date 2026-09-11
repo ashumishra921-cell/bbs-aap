@@ -40,3 +40,7 @@ Local Internet Service Provider (ISP) management mobile app (Expo React Native +
 
 ## Deployment
 - Root-level GET / and GET /health (plus /api/health) return 200 for platform health probes.
+
+## Complaint automation (fix: technicians saw no tickets)
+- New complaints auto-assign to the least-loaded technician (status=assigned, auto_assigned=true). Admin toggle: GET/PATCH /api/settings {auto_assign} (stored in db.settings), Switch on admin Tickets screen.
+- Technicians now see own tickets + unassigned open tickets; can "Accept Ticket" (self-claim via PATCH assigned_to=self). Team screen has NEW / ACTIVE / RESOLVED segments.

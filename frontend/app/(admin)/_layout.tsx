@@ -22,6 +22,7 @@ export default function AdminLayout() {
       <Tabs.Screen name="overview" options={{ title: "Overview", tabBarIcon: ({ color, size }) => <Ionicons name="stats-chart" color={color} size={size} /> }} />
       <Tabs.Screen name="subscribers" options={{ title: "Users", tabBarIcon: ({ color, size }) => <Ionicons name="people" color={color} size={size} /> }} />
       <Tabs.Screen name="team" options={{ title: "Team", tabBarIcon: ({ color, size }) => <Ionicons name="briefcase" color={color} size={size} /> }} />
+      <Tabs.Screen name="payments" options={{ title: "Payments", tabBarIcon: ({ color, size }) => <Ionicons name="wallet" color={color} size={size} /> }} />
       <Tabs.Screen name="complaints" options={{ title: "Tickets", tabBarIcon: ({ color, size }) => <Ionicons name="alert-circle" color={color} size={size} /> }} />
     </Tabs>
   );

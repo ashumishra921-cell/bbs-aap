@@ -1,6 +1,7 @@
 """Broadband Solutions 24x7 - Backend"""
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, UploadFile, File
+from fastapi.responses import StreamingResponse, Response
+from fastapi.concurrency import run_in_threadpool
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -10,6 +11,7 @@ import logging
 import uuid
 import jwt
 import httpx
+import requests
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
@@ -412,10 +414,179 @@ async def activate_plan(user: dict, plan: dict, payment_mode: str, upi_id: Optio
 
 @api_router.post("/recharge")
 async def recharge(body: RechargeBody, user: dict = Depends(get_current_user)):
+    raise HTTPException(status_code=410, detail="Instant recharge disabled. Pay via UPI and upload screenshot for verification.")
+
+
+# ---------------------- UPI payment requests (screenshot verification) ----------------------
+UPI_ID = os.environ.get("UPI_ID", "9312004211-2@ybl")
+UPI_PAYEE_NAME = os.environ.get("UPI_PAYEE_NAME", "Broadband Solutions 24x7")
+STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
+STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
+STORAGE_APP = "broadband-solutions-247"
+MAX_SCREENSHOT_BYTES = 6 * 1024 * 1024
+_storage_key: Optional[str] = None
+
+
+def init_storage() -> str:
+    global _storage_key
+    if _storage_key:
+        return _storage_key
+    resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": os.environ.get("EMERGENT_LLM_KEY")}, timeout=30)
+    resp.raise_for_status()
+    _storage_key = resp.json()["storage_key"]
+    return _storage_key
+
+
+def _storage_call(method: str, path: str, **kw) -> requests.Response:
+    global _storage_key
+    key = init_storage()
+    resp = requests.request(method, f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key, **kw.pop("headers", {})}, **kw)
+    if resp.status_code == 503:  # stale key → re-init once
+        _storage_key = None
+        key = init_storage()
+        resp = requests.request(method, f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key, **kw.pop("headers", {})}, **kw)
+    return resp
+
+
+def put_object(path: str, data: bytes, content_type: str) -> dict:
+    resp = _storage_call("PUT", path, headers={"Content-Type": content_type}, data=data, timeout=120)
+    if resp.status_code == 402:
+        raise HTTPException(status_code=402, detail="Storage credits exhausted. Please contact support.")
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_object(path: str) -> tuple[bytes, str]:
+    resp = _storage_call("GET", path, timeout=60)
+    resp.raise_for_status()
+    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
+
+class PaymentRequest(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    user_name: str
+    user_phone: str
+    plan_id: str
+    plan_name: str
+    amount: float
+    screenshot_path: str
+    utr: Optional[str] = None
+    status: Literal["pending", "approved", "rejected"] = "pending"
+    reject_reason: Optional[str] = None
+    invoice_id: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class CreatePaymentBody(BaseModel):
+    plan_id: str
+    screenshot_path: str
+    utr: Optional[str] = None
+
+
+class RejectBody(BaseModel):
+    reason: Optional[str] = None
+
+
+@api_router.get("/payment-config")
+async def payment_config(user: dict = Depends(get_current_user)):
+    return {"upi_id": UPI_ID, "payee_name": UPI_PAYEE_NAME}
+
+
+@api_router.post("/payments/upload-screenshot")
+async def upload_screenshot(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > MAX_SCREENSHOT_BYTES:
+        raise HTTPException(status_code=413, detail="Screenshot 6MB से छोटा होना चाहिए")
+    ctype = (file.content_type or "image/jpeg").lower()
+    if not ctype.startswith("image/"):
+        raise HTTPException(status_code=400, detail="केवल image फ़ाइल अपलोड करें")
+    ext = {"image/png": "png", "image/webp": "webp", "image/heic": "heic"}.get(ctype, "jpg")
+    path = f"{STORAGE_APP}/uploads/{user['id']}/{uuid.uuid4()}.{ext}"
+    try:
+        result = await run_in_threadpool(put_object, path, data, ctype)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Screenshot upload failed: {e}")
+        raise HTTPException(status_code=502, detail="Upload failed, कृपया पुनः प्रयास करें")
+    await db.files.insert_one({"path": result["path"], "owner_id": user["id"], "content_type": ctype, "size": len(data), "created_at": datetime.now(timezone.utc)})
+    return {"path": result["path"]}
+
+
+@api_router.get("/files/{path:path}")
+async def get_file(path: str, token: Optional[str] = None, authorization: Optional[str] = Header(None)):
+    if not authorization and token:
+        authorization = f"Bearer {token}"
+    user = await get_current_user(authorization)
+    meta = await db.files.find_one({"path": path}, {"_id": 0})
+    if not meta:
+        raise HTTPException(status_code=404, detail="File not found")
+    if user["role"] not in ("admin", "super_admin") and meta["owner_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        content, ctype = await run_in_threadpool(get_object, path)
+    except Exception as e:
+        logger.error(f"File fetch failed: {e}")
+        raise HTTPException(status_code=502, detail="File unavailable")
+    return Response(content=content, media_type=ctype, headers={"Cache-Control": "private, max-age=3600"})
+
+
+@api_router.post("/payments")
+async def create_payment(body: CreatePaymentBody, user: dict = Depends(get_current_user)):
     plan = await db.plans.find_one({"id": body.plan_id}, {"_id": 0})
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
-    return await activate_plan(user, plan, "upi", body.upi_id)
+    meta = await db.files.find_one({"path": body.screenshot_path, "owner_id": user["id"]}, {"_id": 0})
+    if not meta:
+        raise HTTPException(status_code=400, detail="Screenshot अपलोड करें")
+    if await db.payments.find_one({"user_id": user["id"], "status": "pending"}):
+        raise HTTPException(status_code=400, detail="आपका एक payment पहले से verification में है")
+    p = PaymentRequest(
+        user_id=user["id"], user_name=user["name"], user_phone=user["phone"],
+        plan_id=plan["id"], plan_name=plan["name"], amount=plan["price"],
+        screenshot_path=body.screenshot_path, utr=(body.utr or "").strip() or None,
+    )
+    await db.payments.insert_one(p.model_dump())
+    return p.model_dump()
+
+
+@api_router.get("/payments")
+async def list_payments(user: dict = Depends(get_current_user)):
+    q = {} if user["role"] in ("admin", "super_admin") else {"user_id": user["id"]}
+    return await db.payments.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@api_router.post("/payments/{pid}/approve")
+async def approve_payment(pid: str, user: dict = Depends(require_role("super_admin"))):
+    p = await db.payments.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Not found")
+    if p["status"] != "pending":
+        raise HTTPException(status_code=400, detail="Already reviewed")
+    target = await db.users.find_one({"id": p["user_id"]}, {"_id": 0})
+    plan = await db.plans.find_one({"id": p["plan_id"]}, {"_id": 0})
+    if not target or not plan:
+        raise HTTPException(status_code=404, detail="User or plan missing")
+    activated = await activate_plan(target, plan, "upi", p.get("utr"))
+    now = datetime.now(timezone.utc)
+    await db.payments.update_one({"id": pid}, {"$set": {"status": "approved", "invoice_id": activated["invoice"]["id"], "reviewed_by": user["name"], "reviewed_at": now}})
+    return {"success": True, **activated}
+
+
+@api_router.post("/payments/{pid}/reject")
+async def reject_payment(pid: str, body: RejectBody, user: dict = Depends(require_role("super_admin"))):
+    p = await db.payments.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Not found")
+    if p["status"] != "pending":
+        raise HTTPException(status_code=400, detail="Already reviewed")
+    await db.payments.update_one({"id": pid}, {"$set": {"status": "rejected", "reject_reason": (body.reason or "").strip() or None, "reviewed_by": user["name"], "reviewed_at": datetime.now(timezone.utc)}})
+    return {"success": True}
 
 
 # ---------------------- Invoices ----------------------
@@ -743,6 +914,11 @@ async def seed():
 @app.on_event("startup")
 async def startup():
     await seed()
+    try:
+        await run_in_threadpool(init_storage)
+        logger.info("Object storage initialised")
+    except Exception as e:
+        logger.warning(f"Object storage init failed (will retry on first upload): {e}")
 
 
 app.include_router(api_router)

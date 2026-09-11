@@ -9,14 +9,18 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.broadband247.fcn8vo"
+      "bundleIdentifier": "com.emergent.broadband247.fcn8vo",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Upload your UPI payment screenshot for verification"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0F766E"
       },
-      "package": "com.emergent.broadband247.fcn8vo"
+      "package": "com.emergent.broadband247.fcn8vo",
+      "permissions": ["android.permission.READ_MEDIA_IMAGES", "android.permission.READ_EXTERNAL_STORAGE"]
     },
     "web": {
       "bundler": "metro",
@@ -39,7 +43,13 @@
       "expo-secure-store",
       "expo-web-browser",
       "expo-status-bar",
-      "@react-native-vector-icons/ionicons"
+      "@react-native-vector-icons/ionicons",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Upload your UPI payment screenshot for verification"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

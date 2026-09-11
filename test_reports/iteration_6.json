@@ -1,0 +1,42 @@
+{
+  "summary": "Iter 6 — UPI payment with screenshot verification, end-to-end. Backend pytest 21/21 PASSED (test_iter6_upi_payments.py, run serially with -n 0 because payment ID is threaded across TestCreatePayment→TestApprove→TestReject classes). Coverage: GET /api/payment-config (auth-required, returns 9312004211-2@ybl + payee name); POST /api/payments/upload-screenshot (200 for tiny PNG, 400 for non-image, 400 for empty, files metadata persisted); GET /api/files/{path}?token=<jwt> (owner 200 image/*, other subscriber 403, admin 200, super_admin 200); POST /api/payments (bad plan 404, screenshot_path not owned 400, first pending 200 with utr, second pending 400); GET /api/payments (subscriber sees own only, admin+super see all); POST /api/payments/{id}/approve (admin 403, super_admin 200 with invoice.payment_mode='upi', invoice.upi_id=utr, invoice.status='paid', subscription.status='active'; payment.status='approved' + invoice_id linked; approving again 400); POST /api/payments/{id}/reject (admin 403, super 200 storing reject_reason; second reject 400); POST /api/recharge → 410 Gone as required. Frontend UI (390x844 Expo web): (1) Subscriber 9999999996 → Recharge tab → 'Pay via UPI' on Basic 50 opens sheet with QR + upi row (9312004211-2@ybl), copy-upi-btn, open-upi-app-btn (web → info toast), pick-screenshot-btn, utr-input, submit-payment-btn (aria-disabled=true when no shot). page.expect_file_chooser + set_files(tiny PNG) worked on web — change-screenshot-btn appears, submit uploads to real Emergent object storage, sheet closes, My Payments (testID payment-history) shows 'Verification Pending' with testID payment-pending. Re-tapping Pay via UPI while pending shows info toast, sheet does NOT open. (2) Super admin 9999999999 → Payments tab (title 'UPI Payments') → PENDING (1) segment, card with thumbnail image (network 200, naturalWidth=1>0 for our 1px png). Tap → sheet with big screenshot + reject-reason-input + reject-payment-btn + approve-payment-btn. Approve → toast, sheet closes, ALL segment shows item as Approved. (3) Admin 9999999998 → Payments tab → pending card visible (thumbnail loads via /api/files with admin JWT), sheet shows only-super-note, NO approve/reject buttons. Regression: subscriber Home/Recharge/Complaints/Profile render, admin Users tab still works. Deprecated RN Web warnings (shadow*→boxShadow, props.pointerEvents→style.pointerEvents) still present — non-blocking, carried over from iter4-5.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Carry-over RN Web deprecation warnings: shadow* → boxShadow; props.pointerEvents → style.pointerEvents. Non-blocking."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter6_upi_payments.py",
+    "/app/test_reports/pytest/iter6_results.xml"
+  ],
+  "action_items": [
+    "None blocking — UPI payment flow works end-to-end. Optional: migrate deprecated RN Web style props (shadow*/pointerEvents).",
+    "Note for CI: iter6 tests must run serially (`pytest ... -n 0`) — TestCreatePayment.created_id is consumed by TestApprove and TestReject; xdist loadscope splits classes across workers and breaks the chain. This is documented at the top of test_iter6_upi_payments.py."
+  ],
+  "critical_code_review_comments": [
+    "server.py:521 GET /api/files/{path:path} accepts token via query param and reuses get_current_user via a synthesized Authorization header — this is the correct pattern for RN <Image source={{uri, headers}}> which doesn't send Authorization on web. RBAC is enforced: owner OR admin/super_admin. Verified.",
+    "server.py:498 upload_screenshot uses run_in_threadpool(put_object,...) so the synchronous requests-based storage call doesn't block the event loop — good. Path is scoped to `{STORAGE_APP}/uploads/{user_id}/{uuid}.{ext}` so a subscriber cannot guess/overwrite another user's files. The db.files insert with owner_id is what powers ownership check in create_payment and get_file. Verified.",
+    "server.py:539 create_payment correctly enforces (a) plan_id must exist → 404, (b) screenshot_path must be owned by caller → 400, (c) only one pending payment per user → 400. All three verified.",
+    "server.py:564 approve_payment: require_role('super_admin') so admin (non-super) → 403 verified. On success it (i) calls activate_plan(target_user, plan, 'upi', p['utr']) which passes UTR as upi_id on the Invoice, expires prior active subscriptions, inserts fresh Subscription with expires_at=now+validity_days, (ii) sets payment.status='approved' + invoice_id + reviewed_by + reviewed_at. Verified end-to-end via API and UI.",
+    "server.py:581 reject_payment: super_admin only; stores reject_reason and prevents double-review with 400. Verified.",
+    "server.py:415 POST /api/recharge intentionally raises 410 Gone with message 'Instant recharge disabled. Pay via UPI and upload screenshot for verification.' Verified. Consider removing the RechargeBody model + route entirely in a future cleanup — currently harmless.",
+    "recharge.tsx:87-98 pickScreenshot correctly requests media library permissions and shows permBlocked box if denied twice. On web the file chooser opens directly via ImagePicker.launchImageLibraryAsync — Playwright's page.expect_file_chooser handled it cleanly.",
+    "recharge.tsx:172-176 Pay via UPI button gates on `pending` — if any pending payment exists it shows an info toast instead of opening the sheet. This mirrors the backend 400 rule and prevents accidental double submissions. Verified.",
+    "payments.tsx:51-54 imgSource returns web-friendly `{uri: fileUrl(path, token)}` (token in query) and native-friendly `{uri, headers:{Authorization}}` — good cross-platform handling. Thumbnails loaded 200 with naturalWidth>0 during UI test."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter6_upi_payments.py",
+    "/app/test_reports/iteration_6.json",
+    "/app/test_reports/pytest/iter6_results.xml"
+  ],
+  "success_rate": {"backend": "100% (21/21 iter6 tests)", "frontend": "100% for the three flows requested (subscriber submit UPI payment, super_admin approve, admin read-only)"},
+  "seed_data_creation": "Test payments (TESTUTR123, TESTUI9999, BADUTR, TESTADMINVIEW) were created against demo subscriber 9999999996 and either approved or rejected during tests. Final cleanup: any leftover pending payment for 9999999996 was rejected via super_admin. Two fresh test subscribers were signed up (7000012345, 7000067890) via /verify-otp for the file-ownership tests — these are TEST_-named. Seeded demo users and plans untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter6 UPI verification flow is stable. testIDs added on subscriber Recharge: recharge-btn-<planName>, payment-history, payment-<pending|approved|rejected>, copy-upi-btn, open-upi-app-btn, pick-screenshot-btn, change-screenshot-btn, perm-blocked, open-settings-btn, utr-input, submit-payment-btn, cancel-pay. Admin Payments: pay-filter-<pending|all>, pay-<paymentId>, zoom-screenshot, zoom-close, reject-reason-input, reject-payment-btn, approve-payment-btn, only-super-note. Object storage init happens lazily via init_storage() and is called at startup; if credits ever run out, upload returns 402 with a helpful message. To create pending payments for future tests, use `POST /api/payments/upload-screenshot` (multipart form field name is `file`) then `POST /api/payments`. To run the pytest suite: `cd /app && pytest backend/tests/test_iter6_upi_payments.py -n 0` (must be serial due to shared class state).",
+  "rca_of_issue": "N/A — this iteration was a feature verification, not a bug fix. All acceptance criteria in the review request were met on first pass. Minor xdist quirk documented (test file uses cross-class state, must run with -n 0). No code changes were needed to make tests pass."
+}

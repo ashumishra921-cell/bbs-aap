@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -69,8 +70,36 @@ export const api = {
   deletePlan: (id: string) => request(`/plans/${id}`, { method: "DELETE" }),
 
   mySubscription: () => request<any | null>("/me/subscription"),
-  recharge: (plan_id: string, upi_id: string) =>
-    request("/recharge", { method: "POST", body: JSON.stringify({ plan_id, upi_id }) }),
+
+  paymentConfig: () => request<{ upi_id: string; payee_name: string }>("/payment-config"),
+  uploadScreenshot: async (uri: string, name: string, type: string) => {
+    const token = await AsyncStorage.getItem(TOKEN_KEY);
+    const form = new FormData();
+    if (Platform.OS === "web") {
+      const blob = await (await fetch(uri)).blob();
+      form.append("file", blob, name);
+    } else {
+      form.append("file", { uri, name, type } as any);
+    }
+    const res = await fetch(`${BASE}/api/payments/upload-screenshot`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: form,
+    });
+    if (!res.ok) {
+      let msg = `Upload failed (${res.status})`;
+      try { msg = (await res.json()).detail || msg; } catch {}
+      throw new Error(msg);
+    }
+    return (await res.json()) as { path: string };
+  },
+  fileUrl: (path: string, token: string | null) => `${BASE}/api/files/${path}${token ? `?token=${encodeURIComponent(token)}` : ""}`,
+  createPayment: (b: { plan_id: string; screenshot_path: string; utr?: string }) =>
+    request<any>("/payments", { method: "POST", body: JSON.stringify(b) }),
+  payments: () => request<any[]>("/payments"),
+  approvePayment: (id: string) => request<any>(`/payments/${id}/approve`, { method: "POST" }),
+  rejectPayment: (id: string, reason?: string) =>
+    request<any>(`/payments/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }),
 
   invoices: () => request<any[]>("/invoices"),
   invoice: (id: string) => request<any>(`/invoices/${id}`),

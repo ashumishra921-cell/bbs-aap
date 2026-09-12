@@ -15,6 +15,7 @@ import Ionicons from "@react-native-vector-icons/ionicons";
 import dayjs from "dayjs";
 
 import { api } from "@/src/api";
+import { getCurrentLocation, openAppSettings } from "@/src/utils/location";
 import { useToast } from "@/src/components/Toast";
 import { makeStyles, useTheme } from "@/src/theme";
 
@@ -56,9 +57,9 @@ export default function ComplaintsScreen() {
     }
     setSubmitting(true);
     try {
-      await api.createComplaint({ title, description: desc, priority });
+      await api.createComplaint({ title, description: desc, priority, lat: loc?.lat, lng: loc?.lng });
       toast.show("शिकायत दर्ज हो गई ✓", "success");
-      setTitle(""); setDesc(""); setPriority("medium");
+      setTitle(""); setDesc(""); setPriority("medium"); setLoc(null);
       setModalOpen(false);
       load();
     } catch (e: any) {
@@ -66,6 +67,20 @@ export default function ComplaintsScreen() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const [loc, setLoc] = useState<{ lat: number; lng: number } | null>(null);
+  const [locBusy, setLocBusy] = useState(false);
+  const [locBlocked, setLocBlocked] = useState(false);
+
+  const attachLocation = async () => {
+    if (loc) { setLoc(null); return; }
+    setLocBusy(true);
+    const res = await getCurrentLocation();
+    setLocBusy(false);
+    if (res.ok) { setLoc({ lat: res.lat, lng: res.lng }); setLocBlocked(false); return; }
+    if (res.reason === "blocked") setLocBlocked(true);
+    else toast.show(res.reason === "denied" ? "Location की अनुमति नहीं मिली" : "Location उपलब्ध नहीं", "error");
   };
 
   return (
@@ -165,6 +180,24 @@ export default function ComplaintsScreen() {
               ))}
             </View>
 
+            <Pressable onPress={attachLocation} style={[styles.locRow, loc && { borderColor: colors.success }]} testID="attach-location-btn">
+              {locBusy ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : (
+                <Ionicons name={loc ? "checkmark-circle" : "location-outline"} size={20} color={loc ? colors.success : colors.brandPrimary} />
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontWeight: "700", color: colors.onSurface, fontSize: 13 }}>
+                  {loc ? "Location जोड़ी गई ✓ (tap to remove)" : "मेरी location जोड़ें"}
+                </Text>
+                <Text style={{ fontSize: 11, color: colors.muted }}>नज़दीकी technician जल्दी भेजने में मदद मिलती है</Text>
+              </View>
+            </Pressable>
+            {locBlocked && (
+              <View style={styles.permBox} testID="loc-perm-blocked">
+                <Text style={{ flex: 1, fontSize: 12, color: colors.onSurface }}>Location की अनुमति बंद है। Settings से allow करें।</Text>
+                <Pressable onPress={openAppSettings} testID="loc-open-settings"><Text style={{ color: colors.brandPrimary, fontWeight: "700" }}>Open Settings</Text></Pressable>
+              </View>
+            )}
+
             <Pressable
               onPress={submit}
               disabled={submitting}
@@ -184,6 +217,8 @@ export default function ComplaintsScreen() {
 }
 
 const useStyles = makeStyles((colors) => ({
+  locRow: { marginTop: 14, flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary },
+  permBox: { marginTop: 8, flexDirection: "row", alignItems: "center", gap: 10, padding: 10, borderRadius: 10, backgroundColor: "#FEF3C7" },
   header: { paddingHorizontal: 20, paddingBottom: 16, backgroundColor: colors.surfaceSecondary, borderBottomWidth: 1, borderBottomColor: colors.border },
   headerTitle: { fontSize: 22, fontWeight: "800", color: colors.onSurface },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 40, gap: 8 },

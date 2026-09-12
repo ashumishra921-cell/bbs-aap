@@ -1,6 +1,6 @@
-import { useFocusEffect, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@react-native-vector-icons/ionicons";
@@ -9,6 +9,9 @@ import dayjs from "dayjs";
 import { api, loadAuth, User } from "@/src/api";
 import HelplineCard from "@/src/components/HelplineCard";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useLiveRefresh } from "@/src/hooks/useLiveRefresh";
+import { AlertSoundControl } from "@/src/components/ActivityAlerts";
+import PaymentDashboardCard from "@/src/components/PaymentDashboardCard";
 
 export default function SubscriberHome() {
   const router = useRouter();
@@ -19,6 +22,7 @@ export default function SubscriberHome() {
   const [sub, setSub] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -26,17 +30,16 @@ export default function SubscriberHome() {
       setUser(user);
       const s = await api.mySubscription();
       setSub(s);
+      setError(null);
+    } catch (e: any) {
+      setError(e.message || "Plan load नहीं हुआ। फिर कोशिश करें।");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchData();
-    }, [fetchData]),
-  );
+  useLiveRefresh(fetchData);
 
   const usagePct = sub && sub.data_gb > 0 ? Math.min(100, (sub.used_gb / sub.data_gb) * 100) : 0;
   const daysLeft = sub ? Math.max(0, dayjs(sub.expires_at).diff(dayjs(), "day")) : 0;
@@ -48,7 +51,7 @@ export default function SubscriberHome() {
         style={[styles.header, { paddingTop: insets.top + 16 }]}
       >
         <View>
-          <Text style={styles.hello}>नमस्ते 👋</Text>
+          <Text style={styles.hello}>नमस्ते</Text>
           <Text style={styles.name} testID="subscriber-name">{user?.name || ""}</Text>
         </View>
         <Pressable
@@ -64,6 +67,12 @@ export default function SubscriberHome() {
         contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} />}
       >
+        {error && <View style={styles.planCard} testID="subscription-error">
+          <Text style={{ color: colors.error }} testID="subscription-error-message">{error}{sub ? " · पिछली जानकारी दिखाई जा रही है" : ""}</Text>
+          <Pressable testID="subscription-retry" onPress={fetchData} style={styles.rechargeBtn}>
+            <Text style={{ color: colors.brandPrimary, fontWeight: "700" }}>Retry</Text>
+          </Pressable>
+        </View>}
         {loading ? (
           <ActivityIndicator style={{ marginTop: 40 }} color={colors.brandPrimary} />
         ) : sub ? (
@@ -86,20 +95,20 @@ export default function SubscriberHome() {
           )}
           <View style={styles.planCard} testID="active-plan-card">
             <View style={styles.planHeader}>
-              <View>
+              <View style={{ flex: 1, paddingRight: 8 }}>
                 <Text style={styles.planLabel}>Active Plan</Text>
-                <Text style={styles.planName}>{sub.plan_name}</Text>
+                <Text style={styles.planName} testID="active-plan-name">{sub.plan_name}</Text>
               </View>
               <View style={styles.speedBadge}>
                 <Ionicons name="flash" size={14} color={colors.onBrandPrimary} />
-                <Text style={styles.speedText}>{sub.speed_mbps} Mbps</Text>
+                <Text style={styles.speedText} testID="active-plan-speed">{sub.speed_mbps} Mbps</Text>
               </View>
             </View>
 
             {sub.data_gb > 0 ? (
               <>
                 <View style={styles.usageRow}>
-                  <Text style={styles.usageText}>{sub.used_gb.toFixed(1)} / {sub.data_gb} GB</Text>
+                  <Text style={styles.usageText}>{Number(sub.used_gb || 0).toFixed(1)} / {sub.data_gb} GB</Text>
                   <Text style={styles.usagePct}>{usagePct.toFixed(0)}%</Text>
                 </View>
                 <View style={styles.progressBg}>
@@ -115,13 +124,13 @@ export default function SubscriberHome() {
 
             <View style={styles.expiryRow}>
               <Ionicons name="calendar" size={16} color={colors.muted} />
-              <Text style={styles.expiryText}>
+              <Text style={styles.expiryText} testID="active-plan-expiry">
                 Expires {dayjs(sub.expires_at).format("DD MMM YYYY")} · {daysLeft} days left
               </Text>
             </View>
           </View>
           </>
-        ) : (
+        ) : !error ? (
           <View style={styles.emptyCard} testID="no-plan-card">
             <Ionicons name="wifi-outline" size={40} color={colors.muted} />
             <Text style={styles.emptyTitle}>कोई सक्रिय प्लान नहीं</Text>
@@ -134,7 +143,9 @@ export default function SubscriberHome() {
               <Text style={styles.rechargeBtnText}>अभी रिचार्ज करें</Text>
             </Pressable>
           </View>
-        )}
+        ) : null}
+
+        <PaymentDashboardCard />
 
         <Text style={styles.sectionTitle}>Quick Actions</Text>
         <View style={styles.actionsGrid}>
@@ -144,6 +155,7 @@ export default function SubscriberHome() {
           <ActionTile icon="chatbubble-ellipses" label="AI Chat" onPress={() => router.push("/chat")} testID="tile-chat" />
         </View>
 
+        <AlertSoundControl />
         <HelplineCard />
       </ScrollView>
     </View>

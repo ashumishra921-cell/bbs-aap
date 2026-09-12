@@ -11,7 +11,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.emergent.broadband247.fcn8vo",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Upload your UPI payment screenshot for verification"
+        "NSPhotoLibraryUsageDescription": "Upload your UPI payment screenshot for verification",
+        "NSLocationWhenInUseUsageDescription": "Send the nearest technician to your complaint location"
       }
     },
     "android": {
@@ -20,7 +21,12 @@
         "backgroundColor": "#0F766E"
       },
       "package": "com.emergent.broadband247.fcn8vo",
-      "permissions": ["android.permission.READ_MEDIA_IMAGES", "android.permission.READ_EXTERNAL_STORAGE"]
+      "permissions": [
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -49,7 +55,14 @@
         {
           "photosPermission": "Upload your UPI payment screenshot for verification"
         }
-      ]
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Send the nearest technician to your complaint location"
+        }
+      ],
+      ["expo-audio", { "microphonePermission": false, "recordAudioAndroid": false, "enableBackgroundPlayback": false, "enableBackgroundRecording": false }]
     ],
     "experiments": {
       "typedRoutes": true

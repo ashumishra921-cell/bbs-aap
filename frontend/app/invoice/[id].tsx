@@ -89,6 +89,11 @@ export default function InvoiceDetail() {
             </View>
           )}
 
+          <View style={styles.row} testID="invoice-payment-mode-row">
+            <Text style={styles.k}>Payment mode</Text>
+            <Text style={styles.v} testID="invoice-payment-mode">{(inv.payment_mode || "upi").toUpperCase()}</Text>
+          </View>
+
           <View style={styles.divider} />
           <View style={styles.totalRow}>
             <Text style={styles.totalK}>Total Paid</Text>

@@ -4,14 +4,14 @@
 Local Internet Service Provider (ISP) management mobile app (Expo React Native + FastAPI + MongoDB) with 4 roles: Super Admin, Admin, Team Member, Subscriber.
 
 ## Roles & Flows
-- **Subscriber**: Phone/OTP signup → dashboard (active plan, data usage, expiry) → recharge plans (mock UPI) → register/track complaints → view invoices → AI chatbot (Hindi).
+- **Subscriber**: Phone/OTP signup → dashboard (active plan, data usage, expiry) → UPI screenshot recharge awaiting Super Admin approval → register/track complaints → view payment history/invoices → AI chatbot (Hindi).
 - **Team Member**: Phone/OTP login (must be pre-seeded by admin) → view assigned tickets → update status (in_progress / resolved) with resolution note.
 - **Admin**: Metrics dashboard (subscribers, revenue, tickets) → manage subscribers list → manage team (create/delete team members) → view all complaints & assign to team.
 - **Super Admin**: Same as Admin + can create/delete Admin users.
 
 ## Key Features
 - Multi-role phone/OTP auth (mocked OTP `123456`).
-- Plans catalog with mock UPI payment → auto-generates invoice + activates subscription.
+- Plans catalog with UPI screenshot payment → Super Admin approves → invoice + subscription. Existing Super Admin manual plan assignment supports Cash/UPI/Free.
 - Complaint ticketing with priority (low/med/high), status flow (open → assigned → in_progress → resolved).
 - AI Chatbot in Hindi via Claude Haiku 4.5 (Emergent LLM key).
 - Invoice detail view with billing info.
@@ -62,3 +62,20 @@ Local Internet Service Provider (ISP) management mobile app (Expo React Native +
 - GET /api/badges (role-aware): team {new_tickets}, admin/super {pending_payments, open_tickets, expiring_soon}, subscriber {expiring_soon, days_left}. Frontend hook src/hooks/useBadges.ts polls every 30s (foreground only) → tabBarBadge on Team "Tickets" and Admin "Payments" tabs.
 - GET /api/admin/expiring?days=3 → subscribers whose active plan expires within N days; shown on Admin Overview "Expiring in 3 days" card (tap row = call). Subscriber Home shows amber/red expiry banner when ≤3 days left (tap → Recharge).
 - DELETE /api/auth/me → self-delete (super_admin blocked 403): removes user, subscriptions, pending payments, chat; anonymises invoices/complaints/payments; unassigns tickets. Profile: "Delete my account" with confirm (Alert native / modal web) → logout.
+
+## Current increment: dashboard payments, foreground tones, plan refresh
+- User chose ONLY dashboard UPI shortcut, payment history and sound alerts. No new cash-entry flow; earlier four unfinished features explicitly deferred.
+- Reported bug: Super Admin plan activation not visible in subscriber app. RCA found backend correct, Home refreshed only on navigation. `useLiveRefresh` now refreshes Home while focused every 10s and on app resume, with error/retry UI retaining previous data.
+- `/api/payment-history`: role-scoped, paginated unified invoice/payment-request ledger. All/UPI/Cash/Free filter, literal search, approval receipt deduplication; subscribers only see own records, admins all customers. New response models in `backend/payment_activity.py` exclude BSON IDs.
+- Dashboard `PaymentDashboardCard`: UPI shortcut (subscriber recharge / admin review queue), UPI ID copy, full payment history shortcut. `/payment-history` screen shows mode, amount, status, date, customer name/phone for admins, invoice links. Invoice detail displays payment mode.
+- `/api/activity`: role-scoped complaint/payment ID+version snapshots. `ActivityAlertsProvider` polls every 10s while foreground; first fetch silent; unchanged polls silent, per-user persisted mute setting. Bundled original complaint/payment WAVs use expo-audio. Test-tone buttons and latest alert shown on dashboards/team Profile.
+- No microphone, recording, background audio, or push capabilities added. Sound while app closed is not implemented; real-device speaker/silent-mode behavior needs device validation.
+- Frontend Expo config exposes backend URL via `Constants.expoConfig.extra.backendUrl`, sourced from existing environment variable. Protected Metro/env settings unchanged.
+- Verification COMPLETE for requested scope: iter8 10/11 backend checks passed, failed role fixture repaired and passed recheck in iter9; iter9 focused backend3/3 plus requested UI flows passed. Live plan update without navigation, automatic complaint/payment audio events, silent initial/unchanged snapshots, mute persistence/account isolation, subscriber-local updates, team scope, admin/super permissions, history filters/search/invoice modes all verified. Modal verified390x844 and320x700. Native speaker behavior still requires a phone check.
+- Iter9 optional follow-ups addressed: sound ON/OFF indicator and checked accessibility state; payment screenshot rendering waits for token. Final self-test observed real image pixels and3/3 authenticated file responses HTTP200 (no401 observed).
+- Existing Recharge modal made phone-height constrained with internal scroll, fixed submit/cancel footer and top close. Documented Admin/Team demo test fixtures restored by explicit exact-ID operator script, not via login/startup privileges; both API role logins verified.
+
+## Backlog
+- P0: None remaining in requested scope. Phone sound/volume confirmation recommended for device-specific behavior.
+- P1 (deferred by user): Prior Expiry SMS, Collection Report, Technician Location and Plan Editor end-to-end verification; prior report.tsx hook warning. SMS requires MSG91 credentials/templates; no SMS delivery verified.
+- P2: Closed-app push notifications; optional new cash-entry flow only if requested.

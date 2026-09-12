@@ -1,0 +1,73 @@
+{
+  "summary": "Iter 8 completed for backend+frontend scope. Backend pytest for payment-history/activity/plan visibility passed 10/11 with one critical auth-data failure: seeded Admin (9999999998) logs in as subscriber role. Verified subscriber live plan refresh works without navigation (~10-20s polling), payment-history auth/filter/pagination/dedupe behavior works, and activity version updates on complaint status change. Frontend mobile run was partially completed; key subscriber and super-admin flows passed until modal close interaction blocked by viewport/overlay in web preview.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/auth/verify-otp (phone 9999999998)",
+        "issue": "Seeded Admin account returns role 'subscriber' instead of 'admin'. This breaks role-based admin dashboard/payment queue access.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Subscriber recharge UPI modal",
+        "issue": "`cancel-pay` was not tappable in 390x844 web preview after opening payment sheet (element outside viewport).",
+        "testID": "cancel-pay",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Login all seeded roles",
+        "issue": "Admin seeded phone 9999999998 did not reach admin overview because backend returned subscriber role.",
+        "affected_testIDs": [
+          "admin-logout",
+          "dashboard-upi-shortcut"
+        ]
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "Subscriber home / recharge / payment-history",
+        "issues": [
+          "No horizontal overflow observed in tested screens at 390x844."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter8_payment_history_activity.py",
+    "/app/test_reports/pytest/iter8_results.xml"
+  ],
+  "action_items": [
+    "Fix seeded-role integrity for 9999999998 (admin) and ensure role restoration strategy when one seeded account is missing.",
+    "Investigate why seeded admin record became subscriber; guard against accidental role drift in OTP signup path.",
+    "Fix recharge modal close usability at 390x844 (`cancel-pay` should remain tappable without extra scroll).",
+    "After fixes, rerun full 4-role UI suite including admin read-only checks and team/subscriber activity alert isolation."
+  ],
+  "critical_code_review_comments": [
+    "Seed logic in server.py seeds only when users collection is empty (`if count_documents({}) > 0: return`). If one seeded account is deleted/corrupted, it is never repaired on restart. This explains admin role drift persisting.",
+    "Auth verify path auto-creates missing users as subscriber (`verify_otp`), so any missing seeded admin phone can reappear as subscriber unless protected.",
+    "payment_activity.py correctly escapes search input (`re.escape`) and union-dedupes approved screenshot payments using receipt lookup; validated by iter8 tests.",
+    "Activity alert backend returns team complaints only and excludes payment items for team role as expected; validated.",
+    "Frontend uses `EXPO_PUBLIC_BACKEND_URL` in src/api.ts. Ensure this remains aligned with deployment/env policy to avoid config drift."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter8_payment_history_activity.py",
+    "/app/test_reports/pytest/iter8_results.xml",
+    "/app/test_reports/iteration_8.json"
+  ],
+  "success_rate": {
+    "backend": "90.9% (10/11 passed, 1 critical fail)",
+    "frontend": "Partial (~55%) due early stop after repeated modal interaction failure and downstream role impact"
+  },
+  "seed_data_creation": "Created isolated TEST subscribers (7-prefixed) and generated cash/free/upi payment records via assign-plan + screenshot approval for iter8 backend validations.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "UI testing was intentionally stopped after repeated failures around the same interaction area (loop-prevention). Resume from subscriber recharge modal close behavior and rerun seeded-role logins once admin role is fixed.",
+  "rca_of_issue": "Repro: POST /api/auth/verify-otp with phone 9999999998 returns user.role=subscriber. Expected admin. Likely cause: seeded admin record was missing/corrupted earlier; verify_otp auto-creates unknown numbers as subscriber, and seed() does not repair partial seed loss because it exits when users collection is non-empty. Mitigation: add protected seeded-account reconciliation on startup or block auto-signup for reserved seeded admin/team/super phones when missing role metadata."
+}

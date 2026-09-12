@@ -101,3 +101,89 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "Dashboard UPI shortcut, UPI/Cash payment history for subscribers/admin, complaint/payment receive tones. User opted OUT of new cash entry and pending four earlier features. Also reported Super Admin activated plans not appearing in subscriber app."
+backend:
+  - task: "Role-scoped unified payment history and activity snapshots"
+    implemented: true
+    working: true
+    file: "backend/payment_activity.py"
+    stuck_count: 0
+    priority: high
+    needs_retesting: false
+    status_history:
+      - agent: main
+        working: NA
+        comment: "Added /api/payment-history (UPI/Cash/free invoices + unmatched UPI requests, deduplicated on invoice_id, filters/search/pagination) and /api/activity (role-scoped ID/version snapshots, no mutations)."
+      - agent: testing
+        working: true
+        comment: "Iter8/9 verify auth, isolation, literal search, mode filters, pagination, dedupe and team activity scope. Roles restored and regression passes."
+frontend:
+  - task: "Subscriber live plan visibility"
+    implemented: true
+    working: true
+    file: "frontend/app/(subscriber)/home.tsx"
+    stuck_count: 0
+    priority: high
+    needs_retesting: false
+    status_history:
+      - agent: user
+        working: false
+        comment: "Super Admin activates plan but subscriber app does not show it."
+      - agent: main
+        working: NA
+        comment: "RCA confirmed backend correct; added foreground focused 10s polling, resume refresh, network error/retry without false no-plan state."
+      - agent: testing
+        working: true
+        comment: "Iter8 verified plan appears on already-open Home after Super Admin assignment without manual refresh/navigation."
+  - task: "Dashboard UPI shortcut and shared payment history"
+    implemented: true
+    working: true
+    file: "frontend/app/payment-history.tsx"
+    stuck_count: 0
+    priority: high
+    needs_retesting: false
+    status_history:
+      - agent: main
+        working: NA
+        comment: "Dashboard UPI card for customer/admin, read-only history All/UPI/Cash/Free, search, pagination, invoices with payment mode. Existing screenshot approval unchanged, no new cash entry."
+      - agent: testing
+        working: true
+        comment: "Iter9 confirms admin/subscriber history, invoice mode, search/filters, admin read-only queue vs Super approval controls; modal verified390x844 and320x700."
+  - task: "Foreground complaint and payment alert tones"
+    implemented: true
+    working: true
+    file: "frontend/src/components/ActivityAlerts.tsx"
+    stuck_count: 0
+    priority: high
+    needs_retesting: false
+    status_history:
+      - agent: main
+        working: NA
+        comment: "Bundled original WAV tones via expo-audio. Root provider, ID/version comparison, first load silent, per-user persisted mute, test buttons, 10s foreground polls; no mic or background audio permissions."
+      - agent: testing
+        working: true
+        comment: "Iter9 automatic complaint/payment playback, silent baseline/unchanged polls, mute persistence/isolation, subscriber-local status/review events passed. Physical phone speaker behavior not tested."
+metadata:
+  created_by: main_agent
+  version: "1.0"
+  test_sequence: 9
+  run_ui: true
+test_plan:
+  current_focus:
+    - "Live subscriber plan update from Super Admin assignment, without navigation/manual refresh"
+    - "UPI/Cash history and role isolation, deduplication and filters"
+    - "Automatic complaint/payment tone, no replay on unchanged polls, mute persistence, logout isolation"
+    - "Dashboard shortcuts + existing UPI screenshot approval regression"
+  stuck_tasks: []
+  test_all: false
+  test_priority: high_first
+agent_communication:
+  - agent: main
+    message: "TypeScript and changed-file JS/Python lint pass. 390x844 preview login screenshot passes. Test only current scope; leave earlier Expiry SMS, Collection Report, Technician Location, Plan Editor testing deferred. Read memory/test_credentials.md, update for any test accounts created; do not alter production auth."
+  - agent: testing
+    message: "Iteration8: 10/11 backend assertions passed; live plan updates passed. Missing seeded Admin/Team fixtures recreated as subscriber by OTP. UI stopped at Recharge modal close; automatic audio/admin flows incomplete. Report iteration_8.json."
+  - agent: main
+    message: "Critical test fixtures repaired via explicit operator script restricted to exact IDs (restore_test_staff.py), NOT startup/login escalation. Auth playbook followed; both Admin and Team curl logins now pass. Correct DB is broadband_247 with data (troubleshooter accidentally inspected wrong DB). Recorded all iter8 credentials. Recharge uses dimension-constrained sheet with flex scroll, pinned footer and top close. Self-test at390x844 confirms cancel button inside viewport and closes sheet; both actual complaint/payment audio playback status events observed; Cash history works. New lint and TypeScript pass. Remaining: automatic new complaint/payment tones, mute/no replay/role-switch isolation, actual Admin read-only payment queue, admin filters/invoice drilldown. Retest is for critical fixture fix + previously blocked initial implementation verification."
+  - agent: main
+    message: "Iteration9 all requested critical flows pass. Addressed optional findings: explicit ON/OFF and accessibility checked state; screenshot images render only with token. Final mobile self-test verifies toggle state and actual screenshot image pixels, 3 authenticated image responses HTTP200, zero observed401s. Report iteration_9.json reviewed; tester changed only tests/reports/credentials. No new integration mocked; existing demo OTP and deferred previous features unchanged."

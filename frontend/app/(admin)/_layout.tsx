@@ -36,6 +36,8 @@ export default function AdminLayout() {
         }}
       />
       <Tabs.Screen name="complaints" options={{ title: "Tickets", tabBarIcon: ({ color, size }) => <Ionicons name="alert-circle" color={color} size={size} /> }} />
+      <Tabs.Screen name="plans" options={{ href: null, tabBarStyle: { display: "none" } }} />
+      <Tabs.Screen name="report" options={{ href: null, tabBarStyle: { display: "none" } }} />
     </Tabs>
   );
 }

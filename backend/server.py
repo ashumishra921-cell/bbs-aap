@@ -7,6 +7,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import re
+import asyncio
 import logging
 import uuid
 import jwt
@@ -139,6 +140,8 @@ class CreateComplaintBody(BaseModel):
     title: str
     description: str
     priority: Literal["low", "medium", "high"] = "medium"
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 
 class UpdateComplaintBody(BaseModel):
@@ -353,21 +356,53 @@ async def get_me(user: dict = Depends(get_current_user)):
 
 
 # ---------------------- Plans ----------------------
+class UpdatePlanBody(BaseModel):
+    name: Optional[str] = None
+    speed_mbps: Optional[int] = None
+    data_gb: Optional[int] = None
+    validity_days: Optional[int] = None
+    price: Optional[float] = None
+    description: Optional[str] = None
+    active: Optional[bool] = None
+
+
 @api_router.get("/plans")
-async def list_plans():
-    plans = await db.plans.find({}, {"_id": 0}).to_list(500)
-    return plans
+async def list_plans(all: bool = False, authorization: Optional[str] = Header(None)):
+    q: dict = {}
+    if all:
+        user = await get_current_user(authorization)
+        if user["role"] not in ("admin", "super_admin"):
+            raise HTTPException(status_code=403, detail="Forbidden")
+    else:
+        q = {"active": {"$ne": False}}
+    return await db.plans.find(q, {"_id": 0}).sort("price", 1).to_list(500)
 
 
 @api_router.post("/plans")
-async def create_plan(body: CreatePlanBody, user: dict = Depends(require_role("admin", "super_admin"))):
+async def create_plan(body: CreatePlanBody, user: dict = Depends(require_role("super_admin"))):
     plan = Plan(**body.model_dump())
-    await db.plans.insert_one(plan.model_dump())
-    return plan.model_dump()
+    doc = {**plan.model_dump(), "active": True}
+    await db.plans.insert_one(doc)
+    return clean(doc)
+
+
+@api_router.patch("/plans/{plan_id}")
+async def update_plan(plan_id: str, body: UpdatePlanBody, user: dict = Depends(require_role("super_admin"))):
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    res = await db.plans.update_one({"id": plan_id}, {"$set": updates})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return clean(await db.plans.find_one({"id": plan_id}, {"_id": 0}))
 
 
 @api_router.delete("/plans/{plan_id}")
-async def delete_plan(plan_id: str, user: dict = Depends(require_role("admin", "super_admin"))):
+async def delete_plan(plan_id: str, user: dict = Depends(require_role("super_admin"))):
+    if await db.subscriptions.find_one({"plan_id": plan_id, "status": "active"}):
+        # keep history intact: hide instead of hard delete
+        await db.plans.update_one({"id": plan_id}, {"$set": {"active": False}})
+        return {"success": True, "hidden": True}
     await db.plans.delete_one({"id": plan_id})
     return {"success": True}
 
@@ -613,8 +648,31 @@ async def get_setting(key: str, default):
     return doc["value"] if doc else default
 
 
-async def pick_least_loaded_technician() -> Optional[dict]:
-    techs = await db.users.find({"role": "team"}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+import math
+
+LOCATION_FRESH_MINUTES = 120
+
+
+def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = math.radians(lat2 - lat1), math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def fresh_location(u: dict) -> Optional[dict]:
+    loc = u.get("location")
+    if not loc or not loc.get("updated_at"):
+        return None
+    if datetime.now(timezone.utc) - loc["updated_at"] > timedelta(minutes=LOCATION_FRESH_MINUTES):
+        return None
+    return loc
+
+
+async def pick_technician(lat: Optional[float] = None, lng: Optional[float] = None) -> Optional[dict]:
+    """Nearest technician with a fresh location if complaint has coordinates; otherwise least loaded."""
+    techs = await db.users.find({"role": "team"}, {"_id": 0, "id": 1, "name": 1, "location": 1}).to_list(500)
     if not techs:
         return None
     loads = {t["id"]: 0 for t in techs}
@@ -623,7 +681,16 @@ async def pick_least_loaded_technician() -> Optional[dict]:
         {"$group": {"_id": "$assigned_to", "n": {"$sum": 1}}},
     ]):
         loads[row["_id"]] = row["n"]
+    if lat is not None and lng is not None:
+        located = [(haversine_km(lat, lng, l["lat"], l["lng"]), t) for t in techs if (l := fresh_location(t))]
+        if located:
+            dist, t = min(located, key=lambda x: (x[0], loads[x[1]["id"]]))
+            return {**t, "distance_km": round(dist, 1)}
     return min(techs, key=lambda t: loads[t["id"]])
+
+
+async def pick_least_loaded_technician() -> Optional[dict]:
+    return await pick_technician()
 
 
 @api_router.get("/settings")
@@ -657,8 +724,10 @@ async def create_complaint(body: CreateComplaintBody, user: dict = Depends(get_c
         status="open",
     )
     doc = c.model_dump()
+    if body.lat is not None and body.lng is not None:
+        doc["location"] = {"lat": body.lat, "lng": body.lng}
     if await get_setting("auto_assign", True):
-        tech = await pick_least_loaded_technician()
+        tech = await pick_technician(body.lat, body.lng)
         if tech:
             doc.update({"assigned_to": tech["id"], "assigned_to_name": tech["name"], "status": "assigned", "auto_assigned": True})
     await db.complaints.insert_one(doc)
@@ -716,9 +785,35 @@ async def update_complaint(cid: str, body: UpdateComplaintBody, user: dict = Dep
 
 # ---------------------- Team / Users management ----------------------
 @api_router.get("/team")
-async def list_team(user: dict = Depends(require_role("admin", "super_admin"))):
+async def list_team(lat: Optional[float] = None, lng: Optional[float] = None, user: dict = Depends(require_role("admin", "super_admin"))):
     items = await db.users.find({"role": {"$in": ["team", "admin"]}}, {"_id": 0}).to_list(500)
+    for it in items:
+        loc = it.get("location")
+        it["location_fresh"] = fresh_location(it) is not None
+        if loc and lat is not None and lng is not None:
+            it["distance_km"] = round(haversine_km(lat, lng, loc["lat"], loc["lng"]), 1)
+    if lat is not None and lng is not None:
+        items.sort(key=lambda x: (not x.get("location_fresh"), x.get("distance_km", 1e9)))
     return items
+
+
+class LocationBody(BaseModel):
+    lat: float
+    lng: float
+    sharing: bool = True
+
+
+@api_router.post("/team/location")
+async def update_my_location(body: LocationBody, user: dict = Depends(require_role("team", "admin", "super_admin"))):
+    loc = {"lat": body.lat, "lng": body.lng, "updated_at": datetime.now(timezone.utc), "sharing": body.sharing}
+    await db.users.update_one({"id": user["id"]}, {"$set": {"location": loc}})
+    return {"success": True, "location": loc}
+
+
+@api_router.delete("/team/location")
+async def stop_sharing_location(user: dict = Depends(require_role("team", "admin", "super_admin"))):
+    await db.users.update_one({"id": user["id"]}, {"$set": {"location.sharing": False, "location.updated_at": None}})
+    return {"success": True}
 
 
 @api_router.post("/team")
@@ -907,6 +1002,132 @@ async def delete_my_account(user: dict = Depends(get_current_user)):
     return {"success": True}
 
 
+@api_router.get("/admin/report")
+async def collection_report(month: Optional[str] = None, user: dict = Depends(require_role("super_admin"))):
+    """Monthly collection report. month = YYYY-MM (defaults to current month, IST)."""
+    ist = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(ist)
+    try:
+        y, m = (int(x) for x in (month or now_ist.strftime("%Y-%m")).split("-"))
+        start = datetime(y, m, 1, tzinfo=ist)
+    except Exception:
+        raise HTTPException(status_code=400, detail="month must be YYYY-MM")
+    end = datetime(y + (m // 12), (m % 12) + 1, 1, tzinfo=ist)
+    invoices = await db.invoices.find({"status": "paid", "paid_at": {"$gte": start, "$lt": end}}, {"_id": 0}).to_list(5000)
+    by_mode = {"upi": {"count": 0, "amount": 0.0}, "cash": {"count": 0, "amount": 0.0}, "free": {"count": 0, "amount": 0.0}}
+    daily: dict[str, float] = {}
+    for inv in invoices:
+        mode = inv.get("payment_mode") or "upi"
+        by_mode.setdefault(mode, {"count": 0, "amount": 0.0})
+        by_mode[mode]["count"] += 1
+        by_mode[mode]["amount"] += inv.get("amount", 0)
+        day = inv["paid_at"].astimezone(ist).strftime("%Y-%m-%d")
+        daily[day] = daily.get(day, 0) + inv.get("amount", 0)
+    pending = await db.payments.find({"status": "pending"}, {"_id": 0}).to_list(1000)
+    # dues = subscribers whose latest subscription expired and who have no active plan
+    active_ids = {s["user_id"] for s in await db.subscriptions.find({"status": "active"}, {"_id": 0, "user_id": 1}).to_list(5000)}
+    expired = await db.subscriptions.find({"status": "expired", "user_id": {"$nin": list(active_ids)}}, {"_id": 0}).sort("expires_at", -1).to_list(5000)
+    seen: set = set()
+    dues = []
+    for s in expired:
+        if s["user_id"] in seen:
+            continue
+        seen.add(s["user_id"])
+        u = await db.users.find_one({"id": s["user_id"], "role": "subscriber"}, {"_id": 0, "name": 1, "phone": 1})
+        plan = await db.plans.find_one({"id": s["plan_id"]}, {"_id": 0, "price": 1})
+        if u:
+            dues.append({"user_id": s["user_id"], "name": u["name"], "phone": u["phone"], "plan_name": s["plan_name"], "expired_at": s["expires_at"], "amount": plan["price"] if plan else 0})
+    return {
+        "month": f"{y:04d}-{m:02d}",
+        "total_collected": sum(v["amount"] for v in by_mode.values()),
+        "invoices_count": len(invoices),
+        "by_mode": by_mode,
+        "daily": [{"date": d, "amount": a} for d, a in sorted(daily.items())],
+        "pending_verification": {"count": len(pending), "amount": sum(p.get("amount", 0) for p in pending)},
+        "dues": {"count": len(dues), "amount": sum(d["amount"] for d in dues), "items": dues[:100]},
+        "recent_invoices": sorted(invoices, key=lambda i: i["paid_at"], reverse=True)[:50],
+    }
+
+
+# ---------------------- Expiry SMS reminders (MSG91 Flow) ----------------------
+MSG91_EXPIRY_TEMPLATE_ID = os.environ.get("MSG91_EXPIRY_TEMPLATE_ID", "").strip()
+EXPIRY_SMS_ENABLED = bool(MSG91_AUTH_KEY and MSG91_EXPIRY_TEMPLATE_ID)
+REMINDER_INTERVAL_SEC = 60 * 60
+
+
+async def msg91_send_expiry_sms(phone: str, name: str, plan: str, days: int, expires: str) -> None:
+    payload = {
+        "template_id": MSG91_EXPIRY_TEMPLATE_ID,
+        "short_url": "0",
+        "recipients": [{"mobiles": f"91{phone}", "name": name, "plan": plan, "days": str(days), "date": expires, "helpline": "8826004211"}],
+    }
+    async with httpx.AsyncClient(timeout=10) as http:
+        r = await http.post("https://control.msg91.com/api/v5/flow", json=payload, headers={"authkey": MSG91_AUTH_KEY, "Content-Type": "application/json", "Accept": "application/json"})
+    data = r.json()
+    if r.status_code >= 400 or str(data.get("type", "")).lower() == "error":
+        raise RuntimeError(f"MSG91 flow rejected: {data}")
+
+
+async def run_expiry_reminders() -> dict:
+    """Send one reminder per subscription when it enters the 3-day expiry window."""
+    now = datetime.now(timezone.utc)
+    subs = await db.subscriptions.find({
+        "status": "active",
+        "expires_at": {"$lte": now + timedelta(days=EXPIRY_WINDOW_DAYS), "$gt": now},
+        "reminder_sent_at": {"$exists": False},
+    }, {"_id": 0}).to_list(500)
+    sent = skipped = failed = 0
+    for s in subs:
+        u = await db.users.find_one({"id": s["user_id"]}, {"_id": 0, "name": 1, "phone": 1})
+        if not u:
+            continue
+        days = max(0, (s["expires_at"] - now).days)
+        log = {
+            "id": str(uuid.uuid4()), "subscription_id": s["id"], "user_id": s["user_id"], "name": u["name"], "phone": u["phone"],
+            "plan_name": s["plan_name"], "expires_at": s["expires_at"], "days_left": days, "created_at": now, "channel": "sms",
+        }
+        if not EXPIRY_SMS_ENABLED or u["phone"] in DEMO_NUMBERS:
+            log["status"] = "skipped"
+            log["detail"] = "MSG91 expiry template not configured" if not EXPIRY_SMS_ENABLED else "demo number"
+            skipped += 1
+        else:
+            try:
+                await msg91_send_expiry_sms(u["phone"], u["name"], s["plan_name"], days, s["expires_at"].astimezone(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %Y"))
+                log["status"] = "sent"
+                sent += 1
+            except Exception as e:
+                logger.error(f"Expiry SMS failed for {u['phone']}: {e}")
+                log["status"] = "failed"
+                log["detail"] = str(e)[:200]
+                failed += 1
+        await db.reminders.insert_one(log)
+        if log["status"] != "failed":
+            await db.subscriptions.update_one({"id": s["id"]}, {"$set": {"reminder_sent_at": now, "reminder_status": log["status"]}})
+    return {"checked": len(subs), "sent": sent, "skipped": skipped, "failed": failed, "sms_enabled": EXPIRY_SMS_ENABLED}
+
+
+async def reminder_loop():
+    while True:
+        try:
+            res = await run_expiry_reminders()
+            if res["checked"]:
+                logger.info(f"Expiry reminders: {res}")
+        except Exception as e:
+            logger.error(f"Reminder loop error: {e}")
+        await asyncio.sleep(REMINDER_INTERVAL_SEC)
+
+
+@api_router.get("/admin/reminders")
+async def list_reminders(user: dict = Depends(require_role("admin", "super_admin"))):
+    items = await db.reminders.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return {"sms_enabled": EXPIRY_SMS_ENABLED, "items": items}
+
+
+@api_router.post("/admin/reminders/run")
+async def run_reminders_now(user: dict = Depends(require_role("super_admin"))):
+    return await run_expiry_reminders()
+
+
 # ---------------------- Chat (Hindi AI Bot) ----------------------
 SYSTEM_PROMPT = (
     "You are 'Broadband Solutions 24x7' का हिंदी सहायक (Hindi customer support assistant). "
@@ -986,6 +1207,7 @@ async def seed():
 @app.on_event("startup")
 async def startup():
     await seed()
+    asyncio.create_task(reminder_loop())
     try:
         await run_in_threadpool(init_storage)
         logger.info("Object storage initialised")
@@ -993,6 +1215,9 @@ async def startup():
         logger.warning(f"Object storage init failed (will retry on first upload): {e}")
 
 
+from payment_activity import register_payment_activity
+
+register_payment_activity(api_router, db, get_current_user)
 app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,

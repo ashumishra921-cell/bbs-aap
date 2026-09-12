@@ -1,11 +1,12 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@react-native-vector-icons/ionicons";
 import dayjs from "dayjs";
 
 import { api } from "@/src/api";
+import { mapsUrl } from "@/src/utils/location";
 import { useToast } from "@/src/components/Toast";
 import { makeStyles, useTheme } from "@/src/theme";
 
@@ -29,6 +30,16 @@ export default function AdminComplaints() {
   const [autoAssign, setAutoAssign] = useState<boolean>(true);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [nearby, setNearby] = useState<any[] | null>(null);
+
+  const openTicket = async (c: any) => {
+    setSelected(c);
+    setNote(c.resolution_note || "");
+    setNearby(null);
+    if (c.location?.lat != null) {
+      try { setNearby(await api.team(c.location.lat, c.location.lng)); } catch {}
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -113,7 +124,7 @@ export default function AdminComplaints() {
           {filtered.map((c) => {
             const s = STATUS_COLORS[c.status];
             return (
-              <Pressable key={c.id} onPress={() => { setSelected(c); setNote(c.resolution_note || ""); }} style={styles.card} testID={`ac-${c.ticket_no}`}>
+              <Pressable key={c.id} onPress={() => openTicket(c)} style={styles.card} testID={`ac-${c.ticket_no}`}>
                 <View style={styles.cardTop}>
                   <Text style={styles.ticket}>{c.ticket_no}</Text>
                   <View style={[styles.badge, { backgroundColor: s.bg }]}>
@@ -161,12 +172,18 @@ export default function AdminComplaints() {
               )}
             </View>
 
-            <Text style={styles.label}>Assign to Team Member</Text>
+            <Text style={styles.label}>Assign to Team Member{selected?.location ? " · nearest first" : ""}</Text>
+            {selected?.location && (
+              <Pressable onPress={() => Linking.openURL(mapsUrl(selected.location.lat, selected.location.lng))} style={styles.mapLink} testID="ticket-map-link">
+                <Ionicons name="location" size={16} color={colors.brandPrimary} />
+                <Text style={{ color: colors.brandPrimary, fontWeight: "700", fontSize: 12 }}>Customer location — open in Maps</Text>
+              </Pressable>
+            )}
             {team.length === 0 ? (
               <Text style={{ color: colors.muted }}>No team members. Add one first.</Text>
             ) : (
               <View style={{ gap: 8 }}>
-                {team.map((m) => (
+                {((nearby ?? team).filter((m) => m.role === "team")).map((m) => (
                   <Pressable
                     key={m.id}
                     onPress={() => assign(m.id)}
@@ -178,6 +195,14 @@ export default function AdminComplaints() {
                       <Text style={{ fontWeight: "700", color: colors.onSurface }}>{m.name}</Text>
                       <Text style={{ fontSize: 12, color: colors.muted }}>+91 {m.phone}</Text>
                     </View>
+                    {m.distance_km != null && (
+                      <View style={[styles.distBadge, { backgroundColor: m.location_fresh ? "#D1FAE5" : colors.surfaceSecondary }]}>
+                        <Ionicons name="navigate" size={11} color={m.location_fresh ? "#065F46" : colors.muted} />
+                        <Text style={{ fontSize: 11, fontWeight: "700", color: m.location_fresh ? "#065F46" : colors.muted }}>
+                          {m.distance_km} km{m.location_fresh ? "" : " (old)"}
+                        </Text>
+                      </View>
+                    )}
                     <Ionicons name="chevron-forward" size={20} color={colors.muted} />
                   </Pressable>
                 ))}
@@ -221,5 +246,7 @@ const useStyles = makeStyles((colors) => ({
   desc: { fontSize: 14, color: colors.onSurfaceSecondary, marginTop: 12 },
   label: { fontSize: 12, fontWeight: "700", color: colors.onSurface, marginTop: 16, marginBottom: 8 },
   memberRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 12, backgroundColor: colors.surfaceTertiary, borderRadius: 12 },
+  mapLink: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
+  distBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
   cancel: { marginTop: 12, height: 40, alignItems: "center", justifyContent: "center" },
 }));

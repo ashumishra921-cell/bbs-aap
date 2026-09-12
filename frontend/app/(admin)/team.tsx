@@ -1,12 +1,14 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@react-native-vector-icons/ionicons";
+import dayjs from "dayjs";
 
 import { api, loadAuth, User } from "@/src/api";
 import { useToast } from "@/src/components/Toast";
 import { makeStyles, useTheme } from "@/src/theme";
+import { mapsUrl } from "@/src/utils/location";
 
 export default function TeamManage() {
   const styles = useStyles();
@@ -68,6 +70,18 @@ export default function TeamManage() {
                 <Text style={styles.name}>{u.name}</Text>
                 <Text style={styles.phone}>+91 {u.phone}</Text>
                 <Text style={styles.roleTxt}>{u.role.toUpperCase()}</Text>
+                {u.role === "team" && (
+                  u.location?.updated_at ? (
+                    <Pressable onPress={() => Linking.openURL(mapsUrl(u.location.lat, u.location.lng))} style={styles.locRow} testID={`loc-${u.phone}`}>
+                      <Ionicons name="navigate" size={12} color={u.location_fresh ? colors.success : colors.muted} />
+                      <Text style={[styles.locTxt, { color: u.location_fresh ? colors.success : colors.muted }]}>
+                        {u.location_fresh ? "Live" : "Last seen"} · {dayjs(u.location.updated_at).format("DD MMM hh:mm A")} · Maps
+                      </Text>
+                    </Pressable>
+                  ) : (
+                    <Text style={[styles.locTxt, { color: colors.muted }]}>Location not shared</Text>
+                  )
+                )}
               </View>
               {(me?.role === "super_admin" || (me?.role === "admin" && u.role === "team")) && (
                 <Pressable onPress={() => del(u.id)} style={styles.delBtn} testID={`del-${u.phone}`}>
@@ -126,6 +140,9 @@ const useStyles = makeStyles((colors) => ({
   name: { fontWeight: "700", color: colors.onSurface },
   phone: { fontSize: 12, color: colors.muted, marginTop: 2 },
   roleTxt: { fontSize: 10, color: colors.brandPrimary, fontWeight: "800", marginTop: 3, letterSpacing: 0.5 },
+  locRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+  locTxt: { fontSize: 11, fontWeight: "600", marginTop: 2 },
+
   delBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   fab: { position: "absolute", right: 20, width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 10, elevation: 6 },
   modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },

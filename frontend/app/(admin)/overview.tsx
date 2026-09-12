@@ -7,6 +7,8 @@ import Ionicons from "@react-native-vector-icons/ionicons";
 
 import { api, clearAuth, loadAuth, User } from "@/src/api";
 import { makeStyles, useTheme } from "@/src/theme";
+import PaymentDashboardCard from "@/src/components/PaymentDashboardCard";
+import { AlertSoundControl } from "@/src/components/ActivityAlerts";
 
 export default function AdminOverview() {
   const router = useRouter();
@@ -77,11 +79,29 @@ export default function AdminOverview() {
             <MetricCard label="Open Tickets" value={metrics.open_complaints} icon="alert-circle" tint={colors.error} onPress={() => router.push("/(admin)/complaints")} testID="metric-tickets" />
           </View>
 
+          <PaymentDashboardCard admin />
+          <AlertSoundControl />
+
           <View style={styles.revenueCard}>
             <Text style={styles.revLabel}>Total Revenue</Text>
             <Text style={styles.revValue}>₹{metrics.total_revenue?.toLocaleString?.() || 0}</Text>
             <Text style={styles.revSub}>{metrics.resolved_complaints} tickets resolved</Text>
           </View>
+
+          {user?.role === "super_admin" && (
+            <View style={styles.toolsRow}>
+              <Pressable onPress={() => router.push("/(admin)/report")} style={styles.tool} testID="open-report">
+                <Ionicons name="bar-chart" size={22} color={colors.brandPrimary} />
+                <Text style={styles.toolTxt}>Collection Report</Text>
+                <Text style={styles.toolSub}>UPI · Cash · Dues · SMS</Text>
+              </Pressable>
+              <Pressable onPress={() => router.push("/(admin)/plans")} style={styles.tool} testID="open-plans">
+                <Ionicons name="pricetags" size={22} color={colors.brandPrimary} />
+                <Text style={styles.toolTxt}>Plan Editor</Text>
+                <Text style={styles.toolSub}>Add · Edit · Hide plans</Text>
+              </Pressable>
+            </View>
+          )}
 
           <View style={styles.expCard} testID="expiring-card">
             <View style={styles.expHeader}>
@@ -153,6 +173,10 @@ const useStyles = makeStyles((colors) => ({
   revLabel: { fontSize: 12, color: colors.onBrandTertiary, letterSpacing: 0.5, textTransform: "uppercase" },
   revValue: { fontSize: 28, fontWeight: "800", color: colors.onBrandTertiary, marginTop: 4 },
   revSub: { fontSize: 12, color: colors.onBrandTertiary, marginTop: 4 },
+  toolsRow: { flexDirection: "row", gap: 12 },
+  tool: { flex: 1, padding: 14, backgroundColor: colors.surfaceSecondary, borderRadius: 14, borderWidth: 1, borderColor: colors.border, gap: 4 },
+  toolTxt: { fontWeight: "800", color: colors.onSurface, marginTop: 6 },
+  toolSub: { fontSize: 11, color: colors.muted },
   expCard: { padding: 16, backgroundColor: colors.surfaceSecondary, borderRadius: 16, borderWidth: 1, borderColor: colors.border, gap: 10 },
   expHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   expTitle: { flex: 1, fontSize: 15, fontWeight: "800", color: colors.onSurface },

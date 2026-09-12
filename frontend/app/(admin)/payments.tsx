@@ -1,4 +1,4 @@
-import { useFocusEffect } from "expo-router";
+import { useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Image, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -8,6 +8,7 @@ import dayjs from "dayjs";
 import { api, loadAuth, User } from "@/src/api";
 import { useToast } from "@/src/components/Toast";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useLiveRefresh } from "@/src/hooks/useLiveRefresh";
 
 const PAY_STATUS: Record<string, { bg: string; text: string; label: string }> = {
   pending: { bg: "#FEF3C7", text: "#B45309", label: "Pending" },
@@ -16,6 +17,7 @@ const PAY_STATUS: Record<string, { bg: string; text: string; label: string }> = 
 };
 
 export default function AdminPayments() {
+  const router = useRouter();
   const styles = useStyles();
   const { colors } = useTheme();
   const toast = useToast();
@@ -29,6 +31,7 @@ export default function AdminPayments() {
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [zoom, setZoom] = useState(false);
+  const [error, setError] = useState("");
 
   const isSuper = me?.role === "super_admin";
 
@@ -38,12 +41,15 @@ export default function AdminPayments() {
       setMe(auth.user);
       setToken(auth.token);
       setItems(await api.payments());
+      setError("");
+    } catch (e: any) {
+      setError(e.message || "Payments load नहीं हुए");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useLiveRefresh(load);
 
   const pendingCount = items.filter((p) => p.status === "pending").length;
   const filtered = filter === "pending" ? items.filter((p) => p.status === "pending") : items;
@@ -81,6 +87,9 @@ export default function AdminPayments() {
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.title}>UPI Payments</Text>
+        <Pressable testID="admin-all-payment-history" onPress={() => router.push("/payment-history")} style={{ minHeight: 44, justifyContent: "center" }}>
+          <Text style={{ color: colors.brandPrimary, fontWeight: "700" }}>UPI & Cash · Full payment history</Text>
+        </Pressable>
         <View style={styles.segment}>
           {(["pending", "all"] as const).map((f) => (
             <Pressable key={f} testID={`pay-filter-${f}`} onPress={() => setFilter(f)} style={[styles.segItem, filter === f && { backgroundColor: colors.brandPrimary }]}>
@@ -91,6 +100,8 @@ export default function AdminPayments() {
           ))}
         </View>
       </View>
+
+      {!!error && <Pressable testID="admin-payment-retry" onPress={load} style={{ padding: 16, minHeight: 44 }}><Text testID="admin-payment-error" style={{ color: colors.error }}>{error} · Retry</Text></Pressable>}
 
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.brandPrimary} />
@@ -105,7 +116,7 @@ export default function AdminPayments() {
             const s = PAY_STATUS[p.status];
             return (
               <Pressable key={p.id} onPress={() => { setSelected(p); setReason(""); }} style={styles.card} testID={`pay-${p.id}`}>
-                <Image source={imgSource(p.screenshot_path)} style={styles.thumb} resizeMode="cover" />
+                {token ? <Image source={imgSource(p.screenshot_path)} style={styles.thumb} resizeMode="cover" testID={`payment-proof-${p.id}`} /> : <ActivityIndicator style={styles.thumb} color={colors.brandPrimary} />}
                 <View style={{ flex: 1 }}>
                   <View style={styles.cardTop}>
                     <Text style={styles.amount}>₹{p.amount}</Text>
@@ -130,7 +141,7 @@ export default function AdminPayments() {
             <View style={styles.grabber} />
             <Text style={styles.modalTitle}>{selected?.user_name} · ₹{selected?.amount}</Text>
             <Text style={styles.sub}>+91 {selected?.user_phone} · {selected?.plan_name}{selected?.utr ? ` · UTR ${selected.utr}` : ""}</Text>
-            {selected && (
+            {selected && token && (
               <Pressable onPress={() => setZoom(true)} testID="zoom-screenshot">
                 <Image source={imgSource(selected.screenshot_path)} style={styles.bigImg} resizeMode="contain" />
                 <Text style={styles.zoomHint}>Tap to enlarge</Text>
@@ -173,7 +184,7 @@ export default function AdminPayments() {
 
       <Modal visible={zoom} transparent animationType="fade" onRequestClose={() => setZoom(false)}>
         <Pressable style={styles.zoomBg} onPress={() => setZoom(false)} testID="zoom-close">
-          {selected && <Image source={imgSource(selected.screenshot_path)} style={{ width: "100%", height: "85%" }} resizeMode="contain" />}
+          {selected && token && <Image source={imgSource(selected.screenshot_path)} style={{ width: "100%", height: "85%" }} resizeMode="contain" />}
         </Pressable>
       </Modal>
     </View>

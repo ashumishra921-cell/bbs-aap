@@ -11,6 +11,7 @@ import {
   ScrollView,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -37,6 +38,7 @@ export default function RechargeScreen() {
   const { colors } = useTheme();
   const toast = useToast();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const [plans, setPlans] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [cfg, setCfg] = useState<{ upi_id: string; payee_name: string } | null>(null);
@@ -184,11 +186,16 @@ export default function RechargeScreen() {
 
       <Modal visible={!!selected} transparent animationType="slide" onRequestClose={() => setSelected(null)}>
         <KeyboardAvoidingView style={styles.modalBg} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <View style={[styles.sheet, { paddingBottom: insets.bottom + 16, maxHeight: "92%" }]}>
+          <View style={[styles.sheet, { paddingBottom: insets.bottom + 16, height: windowHeight * 0.92, maxHeight: windowHeight - insets.top }]} testID="upi-payment-sheet">
             <View style={styles.grabber} />
-            <Text style={styles.modalTitle}>UPI Payment</Text>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.modalTitle}>UPI Payment</Text>
+              <Pressable testID="close-upi-payment" accessibilityLabel="Close UPI payment" disabled={uploading || submitting} onPress={() => setSelected(null)} style={styles.closeSheet}>
+                <Ionicons name="close" size={24} color={colors.onSurface} />
+              </Pressable>
+            </View>
             <Text style={styles.modalSub}>{selected?.name} · ₹{selected?.price}</Text>
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <ScrollView style={styles.sheetScroll} contentContainerStyle={{ paddingBottom: 16 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" testID="upi-payment-scroll">
               <View style={styles.qrBox}>
                 {upiLink ? <QRCode value={upiLink} size={150} /> : null}
                 <Text style={styles.qrHint}>किसी भी UPI app से scan करें</Text>
@@ -243,6 +250,7 @@ export default function RechargeScreen() {
               />
             </ScrollView>
 
+            <View style={styles.sheetFooter}>
             <Pressable
               onPress={submit}
               disabled={uploading || submitting || !shot}
@@ -258,9 +266,10 @@ export default function RechargeScreen() {
                 <Text style={styles.confirmText}>Submit for Verification</Text>
               )}
             </Pressable>
-            <Pressable onPress={() => setSelected(null)} style={styles.cancelBtn} testID="cancel-pay">
+            <Pressable disabled={uploading || submitting} onPress={() => setSelected(null)} style={styles.cancelBtn} testID="cancel-pay">
               <Text style={{ color: colors.muted, fontWeight: "600" }}>Cancel</Text>
             </Pressable>
+            </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -302,6 +311,10 @@ const useStyles = makeStyles((colors) => ({
   payText: { color: "#FFFFFF", fontWeight: "700" },
   modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   sheet: { backgroundColor: colors.surfaceSecondary, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 },
+  sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexShrink: 0 },
+  closeSheet: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+  sheetScroll: { flex: 1, minHeight: 0 },
+  sheetFooter: { flexShrink: 0 },
   grabber: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 12 },
   modalTitle: { fontSize: 18, fontWeight: "800", color: colors.onSurface },
   modalSub: { fontSize: 14, color: colors.muted, marginTop: 4 },

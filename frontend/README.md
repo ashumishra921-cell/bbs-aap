@@ -48,3 +48,28 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+
+
+# ENVIRIONMENT VARS --->
+# Database
+MONGO_URL=mongodb://localhost:27017
+DB_NAME=broadband_solutions
+
+# Auth
+JWT_SECRET=change_this_to_a_long_random_secret_in_production
+
+# Demo OTP
+DEMO_OTP=123456
+DEMO_NUMBERS=9999999996,9999999997,9999999998,9999999999
+
+# AI Chatbot
+EMERGENT_LLM_KEY=
+
+# MSG91 SMS (optional — blank rakhoge to mock OTP chalega)
+MSG91_AUTH_KEY=
+MSG91_TEMPLATE_ID=
+MSG91_DLT_TE_ID=
+
+# Optional WATI WhatsApp integration
+WATI_API_ENDPOINT=
+WATI_API_TOKEN=wati_117317ca-6f04-416b-aad7-e581ef9b72bb.dbYUySWKMyiw-3eSvyqo2VEK0gNMqvx5-flo-LtS5stBdROByFd_fUF4Y1XUrrU00WNyqhdovzp3ncWp1t7MrDsO2LTFaBUKEA8hroPUha7KINj59CLfq9G5qnK7XeER

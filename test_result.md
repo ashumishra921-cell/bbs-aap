@@ -118,6 +118,17 @@ backend:
       - agent: testing
         working: true
         comment: "Iter8/9 verify auth, isolation, literal search, mode filters, pagination, dedupe and team activity scope. Roles restored and regression passes."
+  - task: "Traccar SMS Gateway OTP and transaction notifications"
+    implemented: true
+    working: NA
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: high
+    needs_retesting: true
+    status_history:
+      - agent: main
+        working: NA
+        comment: "Added Traccar Android Gateway support with secured environment configuration, hashed 5-minute OTP challenges and five-attempt limit. Added non-blocking plan/payment/complaint/expiry notifications. Cloud probe of supplied ngrok URL returned 200; backend reports SMS enabled; Admin demo OTP regression passes. Awaiting user real-device test on a non-demo number because the agent cannot receive SMS."
 frontend:
   - task: "Subscriber live plan visibility"
     implemented: true
@@ -171,6 +182,7 @@ metadata:
   run_ui: true
 test_plan:
   current_focus:
+    - "Traccar delivery and OTP verification on a non-demo Subscriber or Team phone"
     - "Live subscriber plan update from Super Admin assignment, without navigation/manual refresh"
     - "UPI/Cash history and role isolation, deduplication and filters"
     - "Automatic complaint/payment tone, no replay on unchanged polls, mute persistence, logout isolation"
@@ -187,3 +199,5 @@ agent_communication:
     message: "Critical test fixtures repaired via explicit operator script restricted to exact IDs (restore_test_staff.py), NOT startup/login escalation. Auth playbook followed; both Admin and Team curl logins now pass. Correct DB is broadband_247 with data (troubleshooter accidentally inspected wrong DB). Recorded all iter8 credentials. Recharge uses dimension-constrained sheet with flex scroll, pinned footer and top close. Self-test at390x844 confirms cancel button inside viewport and closes sheet; both actual complaint/payment audio playback status events observed; Cash history works. New lint and TypeScript pass. Remaining: automatic new complaint/payment tones, mute/no replay/role-switch isolation, actual Admin read-only payment queue, admin filters/invoice drilldown. Retest is for critical fixture fix + previously blocked initial implementation verification."
   - agent: main
     message: "Iteration9 all requested critical flows pass. Addressed optional findings: explicit ON/OFF and accessibility checked state; screenshot images render only with token. Final mobile self-test verifies toggle state and actual screenshot image pixels, 3 authenticated image responses HTTP200, zero observed401s. Report iteration_9.json reviewed; tester changed only tests/reports/credentials. No new integration mocked; existing demo OTP and deferred previous features unchanged."
+  - agent: main
+    message: "Traccar SMS integration configured through the user-provided public ngrok tunnel. Python lint, py_compile, backend health, provider-enabled config, and Admin mock OTP request all pass. Real SMS delivery requires an end-user non-demo SIM test while Traccar and ngrok remain running; do not use the testing agent until a consented test number is available."

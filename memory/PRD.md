@@ -29,10 +29,11 @@ Local Internet Service Provider (ISP) management mobile app (Expo React Native +
 - Customer helpline 8826004211 shown as tap-to-call card on subscriber Home & Profile (src/components/HelplineCard.tsx).
 
 ## SMS OTP + WhatsApp (added)
-- Backend supports MSG91 OTP (send `POST control.msg91.com/api/v5/otp`, verify `GET /api/v5/otp/verify`). Env: MSG91_AUTH_KEY, MSG91_TEMPLATE_ID, MSG91_DLT_TE_ID, DEMO_NUMBERS, DEMO_OTP. Falls back to demo OTP for all numbers when keys are empty.
+- Backend supports MSG91 OTP (send `POST control.msg91.com/api/v5/otp`, verify `GET /api/v5/otp/verify`) and Traccar SMS Gateway (Android SIM phone via `TRACCAR_SMS_URL` + `TRACCAR_SMS_API_KEY`). Traccar is the active priority provider when configured; it generates a secure 6-digit OTP, hashes it in MongoDB, expires it after 5 minutes, and limits verification to five attempts. MSG91 is used when Traccar is not configured.
 - Phone normalization (+91/0 prefix), 30s resend cooldown for real SMS, `GET /api/auth/config`.
 - OTP screen: mode-aware subtitle + "OTP फिर से भेजें" resend button with 30s countdown.
 - HelplineCard: Call + WhatsApp (wa.me/918826004211) buttons on subscriber Home & Profile.
+- Demo numbers and Admin/Super Admin remain on demo OTP `123456`; non-demo Subscriber/Team numbers use the active SMS provider. Traccar also sends plan activation/payment, payment-submission, complaint creation/update/assignment, and expiry reminder messages without rolling back completed app actions when gateway delivery fails.
 
 ## Subscriber management (Super Admin only)
 - `POST /api/subscribers` {phone,name,address?} and `DELETE /api/subscribers/{id}` — require_role("super_admin"); delete also removes their subscriptions & complaints.
@@ -76,6 +77,6 @@ Local Internet Service Provider (ISP) management mobile app (Expo React Native +
 - Existing Recharge modal made phone-height constrained with internal scroll, fixed submit/cancel footer and top close. Documented Admin/Team demo test fixtures restored by explicit exact-ID operator script, not via login/startup privileges; both API role logins verified.
 
 ## Backlog
-- P0: None remaining in requested scope. Phone sound/volume confirmation recommended for device-specific behavior.
+- P0: Verify live Traccar SMS delivery on a non-demo Subscriber/Team number. The cloud backend can reach the configured ngrok tunnel and provider mode is active; user must keep the Android gateway and ngrok tunnel online, then confirm receipt/OTP verification. Rotate the gateway API key that was exposed in chat once validation is complete.
 - P1 (deferred by user): Prior Expiry SMS, Collection Report, Technician Location and Plan Editor end-to-end verification; prior report.tsx hook warning. SMS requires MSG91 credentials/templates; no SMS delivery verified.
 - P2: Closed-app push notifications; optional new cash-entry flow only if requested.

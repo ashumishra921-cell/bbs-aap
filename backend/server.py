@@ -12,6 +12,8 @@ import logging
 import uuid
 import jwt
 import httpx
+import hashlib
+import secrets
 import requests
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -32,8 +34,14 @@ DEMO_NUMBERS = {p.strip() for p in os.environ.get('DEMO_NUMBERS', '9999999996,99
 MSG91_AUTH_KEY = os.environ.get('MSG91_AUTH_KEY', '').strip()
 MSG91_TEMPLATE_ID = os.environ.get('MSG91_TEMPLATE_ID', '').strip()
 MSG91_DLT_TE_ID = os.environ.get('MSG91_DLT_TE_ID', '').strip()
-SMS_ENABLED = bool(MSG91_AUTH_KEY and MSG91_TEMPLATE_ID)
+TRACCAR_SMS_URL = os.environ.get('TRACCAR_SMS_URL', '').strip().rstrip('/')
+TRACCAR_SMS_API_KEY = os.environ.get('TRACCAR_SMS_API_KEY', '').strip()
+TRACCAR_SMS_ENABLED = bool(TRACCAR_SMS_URL and TRACCAR_SMS_API_KEY)
+MSG91_SMS_ENABLED = bool(MSG91_AUTH_KEY and MSG91_TEMPLATE_ID)
+SMS_ENABLED = TRACCAR_SMS_ENABLED or MSG91_SMS_ENABLED
 OTP_RESEND_COOLDOWN_SEC = 30
+OTP_TTL_MINUTES = 5
+OTP_MAX_ATTEMPTS = 5
 _otp_last_sent: dict[str, datetime] = {}
 
 app = FastAPI(title="Broadband Solutions 24x7")
@@ -262,8 +270,114 @@ def normalize_phone(value: str) -> str:
     return digits
 
 
-def uses_mock_otp(phone: str) -> bool:
-    return (not SMS_ENABLED) or phone in DEMO_NUMBERS
+def uses_mock_otp(phone: str, user: Optional[dict] = None) -> bool:
+    """Keep the demo and admin login paths independent of the SMS gateway."""
+    return (not SMS_ENABLED) or phone in DEMO_NUMBERS or (user or {}).get("role") in ("admin", "super_admin")
+
+
+def otp_digest(phone: str, otp: str) -> str:
+    return hashlib.sha256(f"{JWT_SECRET}:{phone}:{otp}".encode()).hexdigest()
+
+
+async def send_traccar_sms(phone: str, message: str) -> None:
+    """Send a message through the Android Traccar SMS Gateway local HTTP API."""
+    try:
+        async with httpx.AsyncClient(timeout=12) as http:
+            response = await http.post(
+                f"{TRACCAR_SMS_URL}/",
+                headers={"Authorization": TRACCAR_SMS_API_KEY, "Content-Type": "application/json"},
+                json={"to": f"+91{phone}", "message": message},
+            )
+    except httpx.HTTPError as exc:
+        logger.error("Traccar SMS gateway connection failed: %s", exc)
+        raise HTTPException(status_code=502, detail="SMS Gateway से कनेक्शन नहीं हो पाया, कृपया बाद में प्रयास करें")
+    if response.status_code >= 400:
+        logger.error("Traccar SMS gateway rejected request: status=%s", response.status_code)
+        raise HTTPException(status_code=502, detail="SMS भेजने में समस्या, कृपया बाद में प्रयास करें")
+
+
+async def send_transactional_sms(phone: str, message: str) -> bool:
+    """Never let an optional notification roll back a completed business action."""
+    if not TRACCAR_SMS_ENABLED or phone in DEMO_NUMBERS:
+        return False
+    try:
+        await send_traccar_sms(phone, message)
+        return True
+    except HTTPException as exc:
+        logger.warning("Transactional SMS skipped for %s: %s", phone[-4:], exc.detail)
+        return False
+
+
+async def send_traccar_otp(phone: str) -> None:
+    otp = str(secrets.randbelow(900000) + 100000)
+    now = datetime.now(timezone.utc)
+    await db.otp_challenges.update_one(
+        {"phone": phone},
+        {"$set": {
+            "phone": phone, "otp_hash": otp_digest(phone, otp), "attempts": 0,
+            "expires_at": now + timedelta(minutes=OTP_TTL_MINUTES), "created_at": now,
+        }},
+        upsert=True,
+    )
+    try:
+        await send_traccar_sms(phone, f"{otp} is your Broadband Solutions 24x7 OTP. Valid for {OTP_TTL_MINUTES} minutes. Do not share this code.")
+    except HTTPException:
+        await db.otp_challenges.delete_one({"phone": phone})
+        raise
+
+
+async def verify_traccar_otp(phone: str, otp: str) -> None:
+    challenge = await db.otp_challenges.find_one({"phone": phone}, {"_id": 0})
+    now = datetime.now(timezone.utc)
+    if not challenge or challenge["expires_at"] <= now:
+        await db.otp_challenges.delete_one({"phone": phone})
+        raise HTTPException(status_code=400, detail="OTP समाप्त हो गया है। नया OTP मंगाएं")
+    if challenge.get("attempts", 0) >= OTP_MAX_ATTEMPTS or challenge["otp_hash"] != otp_digest(phone, otp):
+        attempts = challenge.get("attempts", 0) + 1
+        if attempts >= OTP_MAX_ATTEMPTS:
+            await db.otp_challenges.delete_one({"phone": phone})
+        else:
+            await db.otp_challenges.update_one({"phone": phone}, {"$set": {"attempts": attempts}})
+        raise HTTPException(status_code=400, detail="गलत या समाप्त OTP")
+    await db.otp_challenges.delete_one({"phone": phone})
+
+
+async def notify_plan_activation(user: dict, plan: dict, invoice: Invoice, expires_at: datetime) -> None:
+    expiry = expires_at.astimezone(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %Y")
+    amount = int(invoice.amount) if invoice.amount.is_integer() else invoice.amount
+    await send_transactional_sms(
+        user["phone"],
+        f"Broadband Solutions 24x7: आपका {plan['name']} प्लान सक्रिय हो गया है। वैधता {expiry} तक है। भुगतान ₹{amount} ({invoice.payment_mode.upper()}) प्राप्त हुआ। सहायता: 8826004211",
+    )
+
+
+async def notify_complaint_created(complaint: dict) -> None:
+    await send_transactional_sms(
+        complaint["user_phone"],
+        f"Broadband Solutions 24x7: आपकी शिकायत {complaint['ticket_no']} दर्ज हो गई है। हम जल्द संपर्क करेंगे।",
+    )
+    if complaint.get("assigned_to"):
+        technician = await db.users.find_one({"id": complaint["assigned_to"]}, {"_id": 0, "phone": 1})
+        if technician:
+            await send_transactional_sms(
+                technician["phone"],
+                f"नई शिकायत {complaint['ticket_no']}: {complaint['title']}. कृपया ऐप में टिकट देखें।",
+            )
+
+
+async def notify_complaint_update(complaint: dict) -> None:
+    label = {"open": "खुली", "assigned": "असाइन", "in_progress": "कार्य जारी", "resolved": "हल"}.get(complaint["status"], complaint["status"])
+    await send_transactional_sms(
+        complaint["user_phone"],
+        f"Broadband Solutions 24x7: शिकायत {complaint['ticket_no']} की स्थिति: {label}।",
+    )
+    if complaint.get("assigned_to"):
+        technician = await db.users.find_one({"id": complaint["assigned_to"]}, {"_id": 0, "phone": 1})
+        if technician:
+            await send_transactional_sms(
+                technician["phone"],
+                f"शिकायत {complaint['ticket_no']} अपडेट हुई: {label}. ऐप में विवरण देखें।",
+            )
 
 
 async def msg91_send_otp(phone: str) -> None:
@@ -313,14 +427,17 @@ async def auth_config():
 async def request_otp(body: RequestOtpBody):
     phone = normalize_phone(body.phone)
     user = await db.users.find_one({"phone": phone}, {"_id": 0})
-    mock = uses_mock_otp(phone)
+    mock = uses_mock_otp(phone, user)
     now = datetime.now(timezone.utc)
     last = _otp_last_sent.get(phone)
     if not mock and last and (now - last).total_seconds() < OTP_RESEND_COOLDOWN_SEC:
         wait = OTP_RESEND_COOLDOWN_SEC - int((now - last).total_seconds())
         raise HTTPException(status_code=429, detail=f"कृपया {wait} सेकंड बाद पुनः प्रयास करें")
     if not mock:
-        await msg91_send_otp(phone)
+        if TRACCAR_SMS_ENABLED:
+            await send_traccar_otp(phone)
+        else:
+            await msg91_send_otp(phone)
     _otp_last_sent[phone] = now
     return {
         "success": True,
@@ -334,13 +451,15 @@ async def request_otp(body: RequestOtpBody):
 @api_router.post("/auth/verify-otp")
 async def verify_otp(body: VerifyOtpBody):
     phone = normalize_phone(body.phone)
-    if uses_mock_otp(phone):
+    user = await db.users.find_one({"phone": phone}, {"_id": 0})
+    if uses_mock_otp(phone, user):
         if body.otp != MOCK_OTP:
             raise HTTPException(status_code=400, detail="गलत OTP")
+    elif TRACCAR_SMS_ENABLED:
+        await verify_traccar_otp(phone, body.otp)
     else:
         await msg91_verify_otp(phone, body.otp)
     body.phone = phone
-    user = await db.users.find_one({"phone": phone}, {"_id": 0})
     if not user:
         # new subscriber signup
         new_user = User(phone=body.phone, name=body.name or f"User {body.phone[-4:]}", role="subscriber")
@@ -444,6 +563,7 @@ async def activate_plan(user: dict, plan: dict, payment_mode: str, upi_id: Optio
         status="active",
     )
     await db.subscriptions.insert_one(sub.model_dump())
+    await notify_plan_activation(user, plan, invoice, sub.expires_at)
     return {"invoice": invoice.model_dump(), "subscription": sub.model_dump()}
 
 
@@ -587,6 +707,10 @@ async def create_payment(body: CreatePaymentBody, user: dict = Depends(get_curre
         screenshot_path=body.screenshot_path, utr=(body.utr or "").strip() or None,
     )
     await db.payments.insert_one(p.model_dump())
+    await send_transactional_sms(
+        user["phone"],
+        f"Broadband Solutions 24x7: ₹{int(p.amount) if p.amount.is_integer() else p.amount} का भुगतान अनुरोध प्राप्त हुआ है। सत्यापन के बाद आपका प्लान सक्रिय किया जाएगा।",
+    )
     return p.model_dump()
 
 
@@ -731,6 +855,7 @@ async def create_complaint(body: CreateComplaintBody, user: dict = Depends(get_c
         if tech:
             doc.update({"assigned_to": tech["id"], "assigned_to_name": tech["name"], "status": "assigned", "auto_assigned": True})
     await db.complaints.insert_one(doc)
+    await notify_complaint_created(doc)
     return clean(doc)
 
 
@@ -780,7 +905,9 @@ async def update_complaint(cid: str, body: UpdateComplaintBody, user: dict = Dep
         updates["resolution_note"] = body.resolution_note
     updates["updated_at"] = datetime.now(timezone.utc)
     await db.complaints.update_one({"id": cid}, {"$set": updates})
-    return clean(await db.complaints.find_one({"id": cid}, {"_id": 0}))
+    updated = clean(await db.complaints.find_one({"id": cid}, {"_id": 0}))
+    await notify_complaint_update(updated)
+    return updated
 
 
 # ---------------------- Team / Users management ----------------------
@@ -1049,9 +1176,9 @@ async def collection_report(month: Optional[str] = None, user: dict = Depends(re
     }
 
 
-# ---------------------- Expiry SMS reminders (MSG91 Flow) ----------------------
+# ---------------------- Expiry SMS reminders ----------------------
 MSG91_EXPIRY_TEMPLATE_ID = os.environ.get("MSG91_EXPIRY_TEMPLATE_ID", "").strip()
-EXPIRY_SMS_ENABLED = bool(MSG91_AUTH_KEY and MSG91_EXPIRY_TEMPLATE_ID)
+EXPIRY_SMS_ENABLED = TRACCAR_SMS_ENABLED or bool(MSG91_AUTH_KEY and MSG91_EXPIRY_TEMPLATE_ID)
 REMINDER_INTERVAL_SEC = 60 * 60
 
 
@@ -1066,6 +1193,16 @@ async def msg91_send_expiry_sms(phone: str, name: str, plan: str, days: int, exp
     data = r.json()
     if r.status_code >= 400 or str(data.get("type", "")).lower() == "error":
         raise RuntimeError(f"MSG91 flow rejected: {data}")
+
+
+async def send_expiry_sms(phone: str, name: str, plan: str, days: int, expires: str) -> None:
+    if TRACCAR_SMS_ENABLED:
+        await send_traccar_sms(
+            phone,
+            f"Broadband Solutions 24x7: नमस्ते {name}, आपका {plan} प्लान {expires} को समाप्त हो रहा है ({days} दिन बाकी)। समय पर रिचार्ज करें। सहायता: 8826004211",
+        )
+        return
+    await msg91_send_expiry_sms(phone, name, plan, days, expires)
 
 
 async def run_expiry_reminders() -> dict:
@@ -1088,11 +1225,11 @@ async def run_expiry_reminders() -> dict:
         }
         if not EXPIRY_SMS_ENABLED or u["phone"] in DEMO_NUMBERS:
             log["status"] = "skipped"
-            log["detail"] = "MSG91 expiry template not configured" if not EXPIRY_SMS_ENABLED else "demo number"
+            log["detail"] = "SMS gateway not configured" if not EXPIRY_SMS_ENABLED else "demo number"
             skipped += 1
         else:
             try:
-                await msg91_send_expiry_sms(u["phone"], u["name"], s["plan_name"], days, s["expires_at"].astimezone(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %Y"))
+                await send_expiry_sms(u["phone"], u["name"], s["plan_name"], days, s["expires_at"].astimezone(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %Y"))
                 log["status"] = "sent"
                 sent += 1
             except Exception as e:

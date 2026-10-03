@@ -10,6 +10,7 @@ import { makeStyles, useTheme } from "@/src/theme";
 import { useToast } from "./Toast";
 
 type Kind = ActivityItem["kind"];
+const ALERT_TONE_DURATION_MS = 9000;
 const AlertContext = createContext({ enabled: true, ready: false, lastAlert: "", toneState: "",
   toggle: (_value: boolean) => {}, testTone: (_kind: Kind) => {} });
 
@@ -27,18 +28,44 @@ export function ActivityAlertsProvider({ children }: { children: React.ReactNode
   const uid = useRef<string | null>(null);
   const enabledRef = useRef(true);
   const playRef = useRef<(kind: Kind) => Promise<void>>(async () => {});
+  const stopTimers = useRef<Record<Kind, ReturnType<typeof setTimeout> | null>>({ complaint: null, payment: null });
   const { show } = useToast();
+
+  const stopTone = useCallback((kind: Kind) => {
+    const player = kind === "payment" ? payment : complaint;
+    const timer = stopTimers.current[kind];
+    if (timer) clearTimeout(timer);
+    stopTimers.current[kind] = null;
+    player.loop = false;
+    player.pause();
+  }, [complaint, payment]);
+
+  const stopAllTones = useCallback(() => {
+    stopTone("complaint");
+    stopTone("payment");
+  }, [stopTone]);
 
   const play = useCallback(async (kind: Kind) => {
     const player = kind === "payment" ? payment : complaint;
+    const otherKind: Kind = kind === "payment" ? "complaint" : "payment";
     try {
       await setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: false, interruptionMode: "mixWithOthers" });
+      stopTone(otherKind);
+      stopTone(kind);
       await player.seekTo(0);
+      player.loop = true;
       player.play();
+      setToneState(`${kind === "payment" ? "Payment" : "Complaint"} tone लगभग 9 सेकंड तक बज रही है`);
+      stopTimers.current[kind] = setTimeout(() => {
+        player.loop = false;
+        player.pause();
+        stopTimers.current[kind] = null;
+        setToneState("Long alert tone पूरी हुई");
+      }, ALERT_TONE_DURATION_MS);
     } catch {
       setToneState("Tone नहीं चल सकी — volume और Test tone जाँचें");
     }
-  }, [complaint, payment]);
+  }, [complaint, payment, stopTone]);
   playRef.current = play;
 
   useEffect(() => {
@@ -88,16 +115,16 @@ export function ActivityAlertsProvider({ children }: { children: React.ReactNode
     const timer = setInterval(poll, 10000);
     const listener = AppState.addEventListener("change", state => {
       if (state === "active") void poll();
-      else { complaint.pause(); payment.pause(); }
+      else stopAllTones();
     });
-    return () => { cancelled = true; clearInterval(timer); listener.remove(); complaint.pause(); payment.pause(); };
-  }, [signedInScreen, show, complaint, payment]);
+    return () => { cancelled = true; clearInterval(timer); listener.remove(); stopAllTones(); };
+  }, [signedInScreen, show, stopAllTones]);
 
   const toggle = async (value: boolean) => {
     if (!uid.current) return;
     enabledRef.current = value;
     setEnabled(value);
-    if (!value) { complaint.pause(); payment.pause(); }
+    if (!value) stopAllTones();
     try { await AsyncStorage.setItem(`alert-sound:${uid.current}`, value ? "on" : "off"); }
     catch { show("Sound preference save नहीं हुई", "error"); }
   };
@@ -121,7 +148,7 @@ export function AlertSoundControl() {
         <Text style={styles.hint} testID="sound-alert-state">{enabled ? "ON" : "OFF"}</Text>
         <Switch testID="sound-alert-toggle" accessibilityLabel="Sound alerts" accessibilityRole="switch" accessibilityState={{ checked: enabled, disabled: !ready }} value={enabled} disabled={!ready} onValueChange={toggle} trackColor={{ true: colors.brandPrimary, false: colors.borderStrong }} />
       </View>
-      <Text style={styles.hint} testID="sound-alert-scope">App खुली होने पर complaint और payment updates की tone (लगभग 10 सेकंड में)।</Text>
+      <Text style={styles.hint} testID="sound-alert-scope">App खुली होने पर complaint और payment updates की tone लगभग 9 सेकंड तक बजेगी।</Text>
       <View style={styles.row}>
         {(["complaint", "payment"] as const).map(kind => (
           <Pressable key={kind} testID={`test-${kind}-tone`} disabled={!enabled || !ready} onPress={() => testTone(kind)} style={({ pressed }) => [styles.test, { opacity: !enabled ? 0.4 : pressed ? 0.65 : 1 }]}>

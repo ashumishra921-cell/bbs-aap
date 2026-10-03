@@ -120,15 +120,39 @@ backend:
         comment: "Iter8/9 verify auth, isolation, literal search, mode filters, pagination, dedupe and team activity scope. Roles restored and regression passes."
   - task: "Traccar SMS Gateway OTP and transaction notifications"
     implemented: true
-    working: NA
+    working: false
     file: "backend/server.py"
-    stuck_count: 0
+    stuck_count: 4
     priority: high
     needs_retesting: true
     status_history:
       - agent: main
         working: NA
         comment: "Added Traccar Android Gateway support with secured environment configuration, hashed 5-minute OTP challenges and five-attempt limit. Added non-blocking plan/payment/complaint/expiry notifications. Cloud probe of supplied ngrok URL returned 200; backend reports SMS enabled; Admin demo OTP regression passes. Awaiting user real-device test on a non-demo number because the agent cannot receive SMS."
+      - agent: user
+        working: false
+        comment: "Reported that OTP did not arrive. Backend access logs show two non-demo OTP requests returning 502; prior log had an unspecific httpx connection failure."
+      - agent: main
+        working: NA
+        comment: "Confirmed current ngrok root GET works through curl and httpx both with default/direct connections. Updated Traccar client to bypass proxy environment, wait up to 45 seconds for a gateway response, reject redirects, and log the concrete timeout/error type. Python lint, py_compile, health, and Admin demo OTP regression pass; requires controlled retry." 
+      - agent: user
+        working: false
+        comment: "After Android-side checks, user reports OTP still did not arrive and Traccar app shows no error. ngrok inspector shows the authenticated POST payload but blank status/latency, indicating the Android upstream did not complete its response. Need rule out testing the receiving number on the same gateway handset/SIM and confirm device-side SMS sending." 
+      - agent: main
+        working: NA
+        comment: "Reproduced one consented non-demo OTP request to the user-provided receiving number. Backend returned HTTP 200 in 0.83s with mode=sms and no demo OTP; Traccar gateway logged HTTP 200 accepted. Delivery receipt still needs confirmation from the receiving phone because the gateway API has no carrier delivery callback." 
+      - agent: user
+        working: false
+        comment: "SMS still not received. User reports seeing demo OTP in the app, but backend reproduction against their non-demo number proves mode=sms; this is distinct from intentional 999... demo-number behavior. Gateway HTTP 200 acceptance without delivery points to Android SMS dispatch/default-SIM handling."
+      - agent: main
+        working: NA
+        comment: "Reviewed current Traccar Android source: POST body/header are correct; it sends using SmsManager.getDefault() unless an optional slot field is supplied. Added TRACCAR_SMS_SIM_SLOT support (0=SIM 1, 1=SIM 2) to select the SIM that can send manually. Lint, backend config, and Admin demo regression pass. Awaiting gateway phone SIM-slot confirmation." 
+      - agent: user
+        working: false
+        comment: "Confirmed one SIM, Traccar selected as Default SMS app, SMS permission allowed, and manual SMS works, but real OTP still not delivered."
+      - agent: main
+        working: NA
+        comment: "Verified a fresh non-demo request created an active real OTP challenge (masked suffix only), so it is not taking the demo route. Updated Login and OTP wording to explicitly state that 123456 works only for four 999... demo accounts; TypeScript lint and 390px preview pass. Traccar source returns HTTP 200 immediately after Android SmsManager call and has no sent/delivery callback, leaving a device/app/carrier-level silent failure after accepted requests." 
 frontend:
   - task: "Subscriber live plan visibility"
     implemented: true
@@ -175,6 +199,9 @@ frontend:
       - agent: testing
         working: true
         comment: "Iter9 automatic complaint/payment playback, silent baseline/unchanged polls, mute persistence/isolation, subscriber-local status/review events passed. Physical phone speaker behavior not tested."
+      - agent: main
+        working: true
+        comment: "User requested 8–10 second important-alert tones for both payment and complaint events. Updated expo-audio players to loop for 9 seconds and auto-stop; active loop cancels on mute, background, screen cleanup, or a new alert. Lint and TypeScript pass; 390px Admin dashboard test clicked Payment tone, observed active long-tone state, then observed automatic completion state." 
 metadata:
   created_by: main_agent
   version: "1.0"

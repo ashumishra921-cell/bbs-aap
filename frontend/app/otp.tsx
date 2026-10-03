@@ -5,7 +5,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -91,7 +90,9 @@ export default function OtpScreen() {
       <View style={styles.body}>
         <Text style={styles.title}>OTP दर्ज करें</Text>
         <Text style={styles.sub} testID="otp-sub">
-          {mode === "sms" ? `+91 ${phone} पर SMS भेजा गया` : `+91 ${phone} · Demo OTP 123456 दर्ज करें`}
+          {mode === "sms"
+            ? `+91 ${phone} पर SMS OTP भेजा गया। Demo OTP 123456 यहां काम नहीं करेगा।`
+            : `+91 ${phone} · Demo OTP 123456 दर्ज करें`}
         </Text>
 
         <TextInput

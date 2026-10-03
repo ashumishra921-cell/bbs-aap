@@ -5,12 +5,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
-import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import Ionicons from "@react-native-vector-icons/ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -35,19 +33,15 @@ export default function LoginScreen() {
     (async () => {
       const { token, user } = await loadAuth();
       if (token && user) {
-        redirectByRole(user.role);
+        if (user.role === "subscriber") router.replace("/(subscriber)/home");
+        else if (user.role === "team") router.replace("/(team)/assigned");
+        else router.replace("/(admin)/overview");
       } else {
         setBooting(false);
         api.authConfig().then((c) => setDemoOtp(c.demo_otp)).catch(() => {});
       }
     })();
-  }, []);
-
-  const redirectByRole = (role: string) => {
-    if (role === "subscriber") router.replace("/(subscriber)/home");
-    else if (role === "team") router.replace("/(team)/assigned");
-    else router.replace("/(admin)/overview");
-  };
+  }, [router]);
 
   const onContinue = async () => {
     if (phone.length < 10) {
@@ -130,7 +124,9 @@ export default function LoginScreen() {
           <View style={styles.hintBox}>
             <Ionicons name="information-circle" size={16} color={colors.info} />
             <Text style={styles.hintText} testID="otp-hint">
-              {demoOtp ? `Demo OTP: ${demoOtp}` : "OTP आपके मोबाइल पर SMS से आएगा (Demo accounts: 123456)"}
+              {demoOtp
+                ? `Demo OTP: ${demoOtp}`
+                : "वास्तविक नंबर पर SMS OTP आएगा। 123456 केवल नीचे के Demo Accounts के लिए है।"}
             </Text>
           </View>
 

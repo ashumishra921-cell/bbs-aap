@@ -36,6 +36,8 @@ MSG91_TEMPLATE_ID = os.environ.get('MSG91_TEMPLATE_ID', '').strip()
 MSG91_DLT_TE_ID = os.environ.get('MSG91_DLT_TE_ID', '').strip()
 TRACCAR_SMS_URL = os.environ.get('TRACCAR_SMS_URL', '').strip().rstrip('/')
 TRACCAR_SMS_API_KEY = os.environ.get('TRACCAR_SMS_API_KEY', '').strip()
+TRACCAR_SMS_SIM_SLOT_RAW = os.environ.get('TRACCAR_SMS_SIM_SLOT', '').strip()
+TRACCAR_SMS_SIM_SLOT = int(TRACCAR_SMS_SIM_SLOT_RAW) if TRACCAR_SMS_SIM_SLOT_RAW in ('0', '1') else None
 TRACCAR_SMS_ENABLED = bool(TRACCAR_SMS_URL and TRACCAR_SMS_API_KEY)
 MSG91_SMS_ENABLED = bool(MSG91_AUTH_KEY and MSG91_TEMPLATE_ID)
 SMS_ENABLED = TRACCAR_SMS_ENABLED or MSG91_SMS_ENABLED
@@ -281,19 +283,30 @@ def otp_digest(phone: str, otp: str) -> str:
 
 async def send_traccar_sms(phone: str, message: str) -> None:
     """Send a message through the Android Traccar SMS Gateway local HTTP API."""
+    payload = {"to": f"+91{phone}", "message": message}
+    if TRACCAR_SMS_SIM_SLOT is not None:
+        payload["slot"] = TRACCAR_SMS_SIM_SLOT
     try:
-        async with httpx.AsyncClient(timeout=12) as http:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=45.0, write=10.0, pool=10.0),
+            follow_redirects=False,
+            trust_env=False,
+        ) as http:
             response = await http.post(
                 f"{TRACCAR_SMS_URL}/",
                 headers={"Authorization": TRACCAR_SMS_API_KEY, "Content-Type": "application/json"},
-                json={"to": f"+91{phone}", "message": message},
+                json=payload,
             )
+    except httpx.TimeoutException as exc:
+        logger.error("Traccar SMS gateway timeout: %s", type(exc).__name__)
+        raise HTTPException(status_code=504, detail="SMS Gateway का जवाब देर से आ रहा है, कृपया एक बार बाद में प्रयास करें")
     except httpx.HTTPError as exc:
-        logger.error("Traccar SMS gateway connection failed: %s", exc)
+        logger.error("Traccar SMS gateway connection failed: %s", type(exc).__name__)
         raise HTTPException(status_code=502, detail="SMS Gateway से कनेक्शन नहीं हो पाया, कृपया बाद में प्रयास करें")
-    if response.status_code >= 400:
+    if not 200 <= response.status_code < 300:
         logger.error("Traccar SMS gateway rejected request: status=%s", response.status_code)
         raise HTTPException(status_code=502, detail="SMS भेजने में समस्या, कृपया बाद में प्रयास करें")
+    logger.info("Traccar SMS gateway accepted request: status=%s, phone_suffix=%s, sim_slot=%s", response.status_code, phone[-4:], TRACCAR_SMS_SIM_SLOT)
 
 
 async def send_transactional_sms(phone: str, message: str) -> bool:
@@ -428,6 +441,13 @@ async def request_otp(body: RequestOtpBody):
     phone = normalize_phone(body.phone)
     user = await db.users.find_one({"phone": phone}, {"_id": 0})
     mock = uses_mock_otp(phone, user)
+    logger.info(
+        "OTP request: phone_suffix=%s role=%s mode=%s provider=%s",
+        phone[-4:],
+        (user or {}).get("role", "new"),
+        "demo" if mock else "sms",
+        "traccar" if TRACCAR_SMS_ENABLED else ("msg91" if MSG91_SMS_ENABLED else "none"),
+    )
     now = datetime.now(timezone.utc)
     last = _otp_last_sent.get(phone)
     if not mock and last and (now - last).total_seconds() < OTP_RESEND_COOLDOWN_SEC:

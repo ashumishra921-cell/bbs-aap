@@ -1,5 +1,5 @@
 """Broadband Solutions 24x7 - Backend"""
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request, UploadFile, File
 from fastapi.responses import StreamingResponse, Response
 from fastapi.concurrency import run_in_threadpool
 from dotenv import load_dotenv
@@ -27,7 +27,12 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url, tz_aware=True)
 db = client[os.environ['DB_NAME']]
 
-JWT_SECRET = os.environ.get('JWT_SECRET', 'dev_secret')
+JWT_SECRET = os.environ.get('JWT_SECRET', '').strip()
+if len(JWT_SECRET) < 32:
+    raise RuntimeError('JWT_SECRET must be a securely generated value of at least 32 characters')
+JWT_TTL_MINUTES = max(15, int(os.environ.get('JWT_TTL_MINUTES', '480')))
+APP_ENV = os.environ.get('APP_ENV', 'production').strip().lower()
+ALLOW_DEMO_OTP = APP_ENV == 'development' and os.environ.get('ALLOW_DEMO_OTP', '').strip().lower() == 'true'
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 MOCK_OTP = os.environ.get('DEMO_OTP', '123456')
 DEMO_NUMBERS = {p.strip() for p in os.environ.get('DEMO_NUMBERS', '9999999996,9999999997,9999999998,9999999999').split(',') if p.strip()}
@@ -214,18 +219,31 @@ class ChatBody(BaseModel):
 
 # ---------------------- Helpers ----------------------
 def make_token(user_id: str) -> str:
-    payload = {"sub": user_id, "iat": datetime.now(timezone.utc).timestamp()}
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": user_id,
+        "iat": now,
+        "exp": now + timedelta(minutes=JWT_TTL_MINUTES),
+        "jti": str(uuid.uuid4()),
+    }
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
-async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
+async def get_token_payload(authorization: Optional[str]) -> dict:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing token")
     token = authorization.split(" ", 1)[1]
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"], options={"require": ["exp", "sub", "jti"]})
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
+    if await db.revoked_tokens.find_one({"jti": payload["jti"]}, {"_id": 0, "jti": 1}):
+        raise HTTPException(status_code=401, detail="Session expired")
+    return payload
+
+
+async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
+    payload = await get_token_payload(authorization)
     user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
@@ -273,8 +291,26 @@ def normalize_phone(value: str) -> str:
 
 
 def uses_mock_otp(phone: str, user: Optional[dict] = None) -> bool:
-    """Keep the demo and admin login paths independent of the SMS gateway."""
-    return (not SMS_ENABLED) or phone in DEMO_NUMBERS or (user or {}).get("role") in ("admin", "super_admin")
+    """Demo OTP is permitted only in a deliberately configured local development environment."""
+    return ALLOW_DEMO_OTP and phone in DEMO_NUMBERS
+
+
+def client_ip_key(request: Request) -> str:
+    raw_ip = request.client.host if request.client else "unknown"
+    return hashlib.sha256(f"{JWT_SECRET}:ip:{raw_ip}".encode()).hexdigest()
+
+
+async def enforce_auth_limit(action: str, phone: str, request: Request, limit: int, window_minutes: int) -> None:
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(minutes=window_minutes)
+    keys = [(f"{action}:phone", phone), (f"{action}:ip", client_ip_key(request))]
+    for bucket, key in keys:
+        if await db.auth_throttles.count_documents({"bucket": bucket, "key": key, "created_at": {"$gte": since}}) >= limit:
+            raise HTTPException(status_code=429, detail="बहुत अधिक प्रयास हुए हैं। कृपया कुछ देर बाद पुनः प्रयास करें")
+    await db.auth_throttles.insert_many([
+        {"bucket": bucket, "key": key, "created_at": now, "expires_at": now + timedelta(minutes=window_minutes)}
+        for bucket, key in keys
+    ])
 
 
 def otp_digest(phone: str, otp: str) -> str:
@@ -433,14 +469,17 @@ async def msg91_verify_otp(phone: str, otp: str) -> None:
 
 @api_router.get("/auth/config")
 async def auth_config():
-    return {"sms_enabled": SMS_ENABLED, "demo_otp": None if SMS_ENABLED else MOCK_OTP, "resend_cooldown_sec": OTP_RESEND_COOLDOWN_SEC}
+    return {"sms_enabled": SMS_ENABLED, "demo_otp": None, "resend_cooldown_sec": OTP_RESEND_COOLDOWN_SEC}
 
 
 @api_router.post("/auth/request-otp")
-async def request_otp(body: RequestOtpBody):
+async def request_otp(body: RequestOtpBody, request: Request):
     phone = normalize_phone(body.phone)
     user = await db.users.find_one({"phone": phone}, {"_id": 0})
     mock = uses_mock_otp(phone, user)
+    await enforce_auth_limit("otp_send", phone, request, limit=5, window_minutes=15)
+    if not mock and not SMS_ENABLED:
+        raise HTTPException(status_code=503, detail="OTP सेवा अभी उपलब्ध नहीं है। कृपया बाद में प्रयास करें")
     logger.info(
         "OTP request: phone_suffix=%s role=%s mode=%s provider=%s",
         phone[-4:],
@@ -450,7 +489,7 @@ async def request_otp(body: RequestOtpBody):
     )
     now = datetime.now(timezone.utc)
     last = _otp_last_sent.get(phone)
-    if not mock and last and (now - last).total_seconds() < OTP_RESEND_COOLDOWN_SEC:
+    if last and (now - last).total_seconds() < OTP_RESEND_COOLDOWN_SEC:
         wait = OTP_RESEND_COOLDOWN_SEC - int((now - last).total_seconds())
         raise HTTPException(status_code=429, detail=f"कृपया {wait} सेकंड बाद पुनः प्रयास करें")
     if not mock:
@@ -462,23 +501,28 @@ async def request_otp(body: RequestOtpBody):
     return {
         "success": True,
         "mode": "demo" if mock else "sms",
-        "message": f"Demo OTP: {MOCK_OTP}" if mock else "OTP SMS भेजा गया",
-        "otp": MOCK_OTP if mock else None,
+        "message": "OTP भेजा गया",
+        "otp": None,
         "is_new_user": user is None,
     }
 
 
 @api_router.post("/auth/verify-otp")
-async def verify_otp(body: VerifyOtpBody):
+async def verify_otp(body: VerifyOtpBody, request: Request):
     phone = normalize_phone(body.phone)
     user = await db.users.find_one({"phone": phone}, {"_id": 0})
-    if uses_mock_otp(phone, user):
+    mock = uses_mock_otp(phone, user)
+    await enforce_auth_limit("otp_verify", phone, request, limit=8, window_minutes=15)
+    if not mock and not SMS_ENABLED:
+        raise HTTPException(status_code=503, detail="OTP सेवा अभी उपलब्ध नहीं है। कृपया बाद में प्रयास करें")
+    if mock:
         if body.otp != MOCK_OTP:
             raise HTTPException(status_code=400, detail="गलत OTP")
     elif TRACCAR_SMS_ENABLED:
         await verify_traccar_otp(phone, body.otp)
     else:
         await msg91_verify_otp(phone, body.otp)
+    await db.auth_throttles.delete_many({"bucket": {"$in": ["otp_verify:phone", "otp_verify:ip"]}, "key": {"$in": [phone, client_ip_key(request)]}})
     body.phone = phone
     if not user:
         # new subscriber signup
@@ -492,6 +536,18 @@ async def verify_otp(body: VerifyOtpBody):
 @api_router.get("/auth/me")
 async def get_me(user: dict = Depends(get_current_user)):
     return user
+
+
+@api_router.post("/auth/logout")
+async def logout(authorization: Optional[str] = Header(None)):
+    payload = await get_token_payload(authorization)
+    expires_at = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+    await db.revoked_tokens.update_one(
+        {"jti": payload["jti"]},
+        {"$set": {"jti": payload["jti"], "expires_at": expires_at, "created_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    return {"success": True}
 
 
 # ---------------------- Plans ----------------------
@@ -694,9 +750,7 @@ async def upload_screenshot(file: UploadFile = File(...), user: dict = Depends(g
 
 
 @api_router.get("/files/{path:path}")
-async def get_file(path: str, token: Optional[str] = None, authorization: Optional[str] = Header(None)):
-    if not authorization and token:
-        authorization = f"Bearer {token}"
+async def get_file(path: str, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     meta = await db.files.find_one({"path": path}, {"_id": 0})
     if not meta:
@@ -781,7 +835,7 @@ async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
     inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not inv:
         raise HTTPException(status_code=404, detail="Not found")
-    if user["role"] == "subscriber" and inv["user_id"] != user["id"]:
+    if user["role"] not in ("admin", "super_admin") and inv["user_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="Forbidden")
     return inv
 
@@ -1339,13 +1393,11 @@ async def seed():
     if await db.users.count_documents({}) > 0:
         return
     logger.info("Seeding initial data...")
-    seeds = [
-        User(phone="9999999999", name="Super Admin", role="super_admin"),
-        User(phone="9999999998", name="Admin Kumar", role="admin"),
-        User(phone="9999999997", name="Ravi (Team)", role="team"),
-        User(phone="9999999996", name="Amit Sharma", role="subscriber", address="MG Road, Delhi"),
-    ]
-    await db.users.insert_many([u.model_dump() for u in seeds])
+    bootstrap_phone = os.environ.get("BOOTSTRAP_SUPER_ADMIN_PHONE", "").strip()
+    if bootstrap_phone:
+        await db.users.insert_one(User(phone=normalize_phone(bootstrap_phone), name="Super Admin", role="super_admin").model_dump())
+    else:
+        logger.warning("No BOOTSTRAP_SUPER_ADMIN_PHONE configured; skipping initial privileged-user seed")
 
     plans = [
         Plan(name="Basic 50", speed_mbps=50, data_gb=200, validity_days=30, price=499.0,
@@ -1363,6 +1415,9 @@ async def seed():
 
 @app.on_event("startup")
 async def startup():
+    await db.auth_throttles.create_index("expires_at", expireAfterSeconds=0)
+    await db.revoked_tokens.create_index("expires_at", expireAfterSeconds=0)
+    await db.revoked_tokens.create_index("jti", unique=True)
     await seed()
     asyncio.create_task(reminder_loop())
     try:
@@ -1376,12 +1431,27 @@ from payment_activity import register_payment_activity
 
 register_payment_activity(api_router, db, get_current_user)
 app.include_router(api_router)
+ALLOWED_ORIGINS = [origin.strip() for origin in os.environ.get("CORS_ORIGINS", "").split(",") if origin.strip()]
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), payment=()"
+    if request.headers.get("x-forwarded-proto") == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=False,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 

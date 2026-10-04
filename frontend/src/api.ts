@@ -47,6 +47,7 @@ async function request<T = any>(path: string, options: RequestInit = {}): Promis
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${BASE}/api${path}`, { ...options, headers });
   if (!res.ok) {
+    if (res.status === 401) await clearAuth();
     let msg = `Request failed (${res.status})`;
     try {
       const data = await res.json();
@@ -62,7 +63,7 @@ export const api = {
   authConfig: () =>
     request<{ sms_enabled: boolean; demo_otp: string | null; resend_cooldown_sec: number }>("/auth/config"),
   requestOtp: (phone: string) =>
-    request<{ success: boolean; otp: string | null; mode: "demo" | "sms"; is_new_user: boolean }>("/auth/request-otp", {
+    request<{ success: boolean; mode: "demo" | "sms"; is_new_user: boolean }>("/auth/request-otp", {
       method: "POST",
       body: JSON.stringify({ phone }),
     }),
@@ -72,6 +73,7 @@ export const api = {
       body: JSON.stringify({ phone, otp, name }),
     }),
   me: () => request<User>("/auth/me"),
+  logout: () => request<{ success: boolean }>("/auth/logout", { method: "POST" }),
   deleteMyAccount: () => request("/auth/me", { method: "DELETE" }),
   badges: () => request<any>("/badges"),
   adminExpiring: (days = 3) => request<any[]>(`/admin/expiring?days=${days}`),
@@ -114,7 +116,7 @@ export const api = {
     }
     return (await res.json()) as { path: string };
   },
-  fileUrl: (path: string, token: string | null) => `${BASE}/api/files/${path}${token ? `?token=${encodeURIComponent(token)}` : ""}`,
+  fileUrl: (path: string) => `${BASE}/api/files/${path}`,
   createPayment: (b: { plan_id: string; screenshot_path: string; utr?: string }) =>
     request<any>("/payments", { method: "POST", body: JSON.stringify(b) }),
   payments: () => request<any[]>("/payments"),

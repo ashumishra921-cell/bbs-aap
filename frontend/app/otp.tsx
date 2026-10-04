@@ -19,7 +19,7 @@ import { makeStyles, useTheme } from "@/src/theme";
 
 export default function OtpScreen() {
   const router = useRouter();
-  const { phone, isNew, mode } = useLocalSearchParams<{ phone: string; isNew: string; mode: string }>();
+  const { phone, isNew } = useLocalSearchParams<{ phone: string; isNew: string }>();
   const styles = useStyles();
   const { colors } = useTheme();
   const toast = useToast();
@@ -39,8 +39,8 @@ export default function OtpScreen() {
   const resend = async () => {
     setResending(true);
     try {
-      const res = await api.requestOtp(phone as string);
-      toast.show(res.mode === "sms" ? "OTP फिर से SMS किया गया" : `Demo OTP: ${res.otp}`, "success");
+      await api.requestOtp(phone as string);
+      toast.show("OTP फिर से SMS किया गया", "success");
       setCooldown(30);
     } catch (e: any) {
       toast.show(e.message || "Resend failed", "error");
@@ -90,9 +90,7 @@ export default function OtpScreen() {
       <View style={styles.body}>
         <Text style={styles.title}>OTP दर्ज करें</Text>
         <Text style={styles.sub} testID="otp-sub">
-          {mode === "sms"
-            ? `+91 ${phone} पर SMS OTP भेजा गया। Demo OTP 123456 यहां काम नहीं करेगा।`
-            : `+91 ${phone} · Demo OTP 123456 दर्ज करें`}
+          {`+91 ${phone} पर SMS OTP भेजा गया। कृपया 6-digit OTP दर्ज करें।`}
         </Text>
 
         <TextInput

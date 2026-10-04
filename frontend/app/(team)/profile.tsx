@@ -80,6 +80,7 @@ export default function TeamProfile() {
 
   const logout = async () => {
     watcher.current?.remove();
+    try { await api.logout(); } catch {}
     await clearAuth();
     router.replace("/");
   };

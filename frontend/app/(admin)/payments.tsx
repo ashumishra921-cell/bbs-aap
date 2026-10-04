@@ -1,6 +1,6 @@
 import { useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Image, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@react-native-vector-icons/ionicons";
 import dayjs from "dayjs";
@@ -55,9 +55,7 @@ export default function AdminPayments() {
   const filtered = filter === "pending" ? items.filter((p) => p.status === "pending") : items;
 
   const imgSource = (path: string) =>
-    Platform.OS === "web"
-      ? { uri: api.fileUrl(path, token) }
-      : { uri: api.fileUrl(path, null), headers: { Authorization: `Bearer ${token}` } };
+    ({ uri: api.fileUrl(path), headers: { Authorization: `Bearer ${token}` } });
 
   const approve = async () => {
     if (!selected) return;

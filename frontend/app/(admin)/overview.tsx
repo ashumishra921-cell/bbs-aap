@@ -39,6 +39,7 @@ export default function AdminOverview() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const logout = async () => {
+    try { await api.logout(); } catch {}
     await clearAuth();
     router.replace("/");
   };

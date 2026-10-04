@@ -27,7 +27,7 @@ export default function LoginScreen() {
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const [booting, setBooting] = useState(true);
-  const [demoOtp, setDemoOtp] = useState<string | null>(null);
+  const [smsEnabled, setSmsEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -38,7 +38,7 @@ export default function LoginScreen() {
         else router.replace("/(admin)/overview");
       } else {
         setBooting(false);
-        api.authConfig().then((c) => setDemoOtp(c.demo_otp)).catch(() => {});
+        api.authConfig().then((c) => setSmsEnabled(c.sms_enabled)).catch(() => setSmsEnabled(false));
       }
     })();
   }, [router]);
@@ -124,18 +124,10 @@ export default function LoginScreen() {
           <View style={styles.hintBox}>
             <Ionicons name="information-circle" size={16} color={colors.info} />
             <Text style={styles.hintText} testID="otp-hint">
-              {demoOtp
-                ? `Demo OTP: ${demoOtp}`
-                : "वास्तविक नंबर पर SMS OTP आएगा। 123456 केवल नीचे के Demo Accounts के लिए है।"}
+              {smsEnabled === false
+                ? "OTP सेवा अभी उपलब्ध नहीं है। कृपया सहायता केंद्र से संपर्क करें।"
+                : "आपके मोबाइल नंबर पर सुरक्षित 6-digit OTP SMS भेजा जाएगा।"}
             </Text>
-          </View>
-
-          <View style={styles.demoNumbers}>
-            <Text style={styles.demoTitle}>Demo Accounts</Text>
-            <Text style={styles.demoLine}>Subscriber: 9999999996</Text>
-            <Text style={styles.demoLine}>Team: 9999999997</Text>
-            <Text style={styles.demoLine}>Admin: 9999999998</Text>
-            <Text style={styles.demoLine}>Super Admin: 9999999999</Text>
           </View>
         </View>
       </View>

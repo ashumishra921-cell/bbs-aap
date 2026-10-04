@@ -1,0 +1,56 @@
+{
+  "summary": "Iter 10 security regression run completed for backend+frontend. 13 backend security tests executed: 11 passed, 2 failed. Mobile web login flow validated that demo/admin hints are not disclosed and former demo phone 9999999999 does not navigate to OTP when provider is unavailable.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/auth/request-otp",
+        "issue": "Rate limit did not trigger 429 on rapid repeated requests while SMS provider is unavailable; endpoint consistently returned 503, so request throttling is bypassed in this path.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "OPTIONS /api/auth/request-otp",
+        "issue": "Configured preview origin preflight is rejected with 400 'Disallowed CORS origin'. Additionally, GET /api/auth/config responded with Access-Control-Allow-Origin: * in this environment, indicating CORS behavior drift/inconsistency.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter10_security_regression.py",
+    "/app/test_reports/pytest/iter10_security_results.xml",
+    "/app/test_reports/artifacts_iter10_ui/mobile_login_loaded.jpeg",
+    "/app/test_reports/artifacts_iter10_ui/mobile_after_demo_phone_submit.jpeg",
+    "/root/.emergent/automation_output/20261004_050058/console_20261004_050058.log"
+  ],
+  "action_items": [
+    "Move/enforce auth request throttling before provider-availability fail-closed branch in /api/auth/request-otp so rapid abuse still reaches 429.",
+    "Fix CORS allowlist behavior for preview origin at runtime (preflight should succeed only for configured origin and fail for others consistently).",
+    "Audit ingress/proxy CORS overrides because API GET responses currently expose wildcard Access-Control-Allow-Origin in this environment.",
+    "Update /app/memory/test_credentials.md security notes: it still documents demo OTP/public demo behavior that no longer matches patched security posture."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py sets default JWT secret fallback ('dev_secret'); security policy should fail fast if JWT_SECRET is missing instead of defaulting.",
+    "frontend/src/api.ts uses EXPO_PUBLIC_BACKEND_URL; project policy references EXPO_BACKEND_URL naming for backend URL source consistency.",
+    "Current CORS behavior appears split between app middleware and upstream proxy headers, causing contradictory preflight vs GET behavior."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter10_security_regression.py",
+    "/app/test_reports/pytest/iter10_security_results.xml",
+    "/app/test_reports/iteration_10.json"
+  ],
+  "success_rate": {
+    "backend": "84.6% (11/13)",
+    "frontend": "100% for tested security UI checks (2/2 core checks passed)"
+  },
+  "seed_data_creation": "No new seed users/data created.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Use /app/backend/tests/test_iter10_security_regression.py as baseline. If CORS is fixed, rerun with exported frontend/.env and verify both OPTIONS preflight and actual browser-origin fetch behavior.",
+  "rca_of_issue": "RCA1: request-otp throttling executes after provider-enabled guard in server.py, so when SMS provider is off it returns 503 before counting attempts, preventing 429. RCA2: runtime CORS behavior is inconsistent (preflight rejects configured preview origin, but GET shows wildcard ACAO), suggesting allowlist mismatch and/or upstream proxy CORS header injection overriding backend intent."
+}

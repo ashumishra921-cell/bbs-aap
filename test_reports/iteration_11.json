@@ -1,0 +1,59 @@
+{
+  "summary": "Iter 11 security regression completed for backend+frontend. All targeted app-side security checks passed, including OTP throttling while provider unavailable, OTP leakage blocking, JWT exp+jti enforcement/revocation, file token rejection, and team invoice denial. CORS behavior is confirmed split: local FastAPI allowlist works correctly; public preview ingress/proxy still mutates/fails CORS.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "OPTIONS /api/auth/request-otp (public preview URL)",
+        "issue": "Public preview preflight still returns 400 while local backend preflight returns 200 with exact allowlisted origin; this is infrastructure/proxy divergence, not FastAPI CORS middleware behavior."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Login -> request OTP for former demo admin phone (9999999999)",
+        "issue": "UI correctly stays on login and does not navigate to OTP. User receives non-sensitive failure feedback/rate-limit message; no demo OTP/admin leakage observed.",
+        "affected_testIDs": [
+          "phone-input",
+          "request-otp-btn",
+          "otp-hint"
+        ]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter11_security_regression.py",
+    "/app/test_reports/pytest/iter11_security_results.xml",
+    "/app/test_reports/artifacts_iter11_ui/mobile_login_loaded.jpeg",
+    "/app/test_reports/artifacts_iter11_ui/mobile_after_demo_phone_submit.jpeg",
+    "/root/.emergent/automation_output/20261004_050719/console_20261004_050719.log"
+  ],
+  "action_items": [
+    "Keep app CORS allowlist strict as implemented; do not relax to wildcard.",
+    "Escalate preview ingress/proxy CORS mutation (public OPTIONS 400 + wildcard ACAO behavior in preview path) to platform/infrastructure owners.",
+    "Optional hardening consistency: align frontend env naming with project convention (EXPO_BACKEND_URL vs EXPO_PUBLIC_BACKEND_URL) if platform policy requires it."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py CORS middleware configuration is strict and correct locally (explicit allowlist, allow_credentials=false, restricted methods/headers).",
+    "frontend/src/api.ts currently reads EXPO_PUBLIC_BACKEND_URL; project policy text references EXPO_BACKEND_URL naming for consistency.",
+    "No static/demo OTP exposure paths observed in backend responses or login UI under production settings."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter11_security_regression.py",
+    "/app/test_reports/pytest/iter11_security_results.xml",
+    "/app/test_reports/iteration_11.json"
+  ],
+  "success_rate": {
+    "backend": "100% (10/10)",
+    "frontend": "100% for tested security login checks (2/2)"
+  },
+  "seed_data_creation": "No seed data created.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Use test_iter11_security_regression.py for regression baseline. Expect local CORS preflight to pass for configured origin and block evil origin; public preview preflight may still fail due to ingress/proxy layer.",
+  "rca_of_issue": "Public-vs-local CORS divergence reproduces consistently: local direct backend URL returns expected allowlist behavior, while preview ingress/proxy path returns disallowed/modified CORS responses before normal app behavior. This indicates upstream header/policy mutation outside application code."
+}

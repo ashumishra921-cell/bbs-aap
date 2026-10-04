@@ -1,82 +1,33 @@
 # Broadband Solutions 24×7 — PRD
 
-## Overview
-Local Internet Service Provider (ISP) management mobile app (Expo React Native + FastAPI + MongoDB) with 4 roles: Super Admin, Admin, Team Member, Subscriber.
+## Product
+Mobile ISP management app for Super Admin, Admin, Team Members and Subscribers. Core flows: phone/OTP login, plans and subscriptions, UPI screenshot payments/invoices, complaints and assignment, Hindi AI support chat, payment history, expiry awareness, live refresh and dashboard alerts.
 
-## Roles & Flows
-- **Subscriber**: Phone/OTP signup → dashboard (active plan, data usage, expiry) → UPI screenshot recharge awaiting Super Admin approval → register/track complaints → view payment history/invoices → AI chatbot (Hindi).
-- **Team Member**: Phone/OTP login (must be pre-seeded by admin) → view assigned tickets → update status (in_progress / resolved) with resolution note.
-- **Admin**: Metrics dashboard (subscribers, revenue, tickets) → manage subscribers list → manage team (create/delete team members) → view all complaints & assign to team.
-- **Super Admin**: Same as Admin + can create/delete Admin users.
+## Architecture
+- **Mobile:** Expo Router / React Native, TypeScript, Expo Audio, AsyncStorage, Expo Image.
+- **Backend:** FastAPI, Motor/MongoDB, JWT auth, Emergent Object Storage for payment images.
+- **Integrations:** Emergent LLM for Hindi chatbot; MSG91 is the intended production OTP provider after DLT/template setup. Traccar gateway is disabled.
 
-## Key Features
-- Multi-role phone/OTP auth (mocked OTP `123456`).
-- Plans catalog with UPI screenshot payment → Super Admin approves → invoice + subscription. Existing Super Admin manual plan assignment supports Cash/UPI/Free.
-- Complaint ticketing with priority (low/med/high), status flow (open → assigned → in_progress → resolved).
-- AI Chatbot in Hindi via Claude Haiku 4.5 (Emergent LLM key).
-- Invoice detail view with billing info.
+## Implemented
+- Role-scoped dashboards, subscriptions, plan management, customer/team management, UPI screenshot review, invoices, reports and payment history.
+- Complaint creation, automatic/administrative assignment, team work states, location sharing and status updates.
+- Foreground complaint and payment audio alerts with a visible switch, test controls and ~9-second repeat/automatic-stop playback.
+- Subscriber Home refreshes while focused so new plan activations become visible without manual navigation.
+- UPI files are stored in managed object storage and accessed using Authorization bearer headers only.
 
-## Tech Stack
-- Frontend: Expo Router 57, React Native 0.86, react-native-reanimated, expo-linear-gradient, @react-native-vector-icons/ionicons.
-- Backend: FastAPI + Motor (MongoDB async) + emergentintegrations for Claude Haiku.
-- Design: Teal/blue palette (`#0F766E` primary), clean cards, iOS-native clean personality.
+## Security Status — Iteration 11
+- Production authentication is **real-provider-only**: public demo OTP, shared `123456`, role bypasses and seeded privileged demo accounts are disabled.
+- If no configured secure SMS provider exists, request/verify OTP fail closed with a non-sensitive 503. Current MSG91 credentials are not yet configured, so public login is intentionally unavailable.
+- OTP endpoints have phone + hashed-IP throttles; responses never return an OTP.
+- JWTs require `exp` + `jti`, expire after `JWT_TTL_MINUTES`, and logout stores a server-side revocation record. Legacy non-expiring tokens are rejected.
+- Team members cannot access other users' invoices. File query-token access is rejected. CORS is strict in FastAPI, credentials are disabled, and standard security headers are attached.
+- Independent Iter11 regression passed: **10/10 backend** and **2/2 frontend** security checks.
 
-## Seeded Data
-- 4 role users (see test_credentials.md).
-- 4 broadband plans (₹499 / ₹799 / ₹1199 / ₹1599).
-
-## Helpline
-- Customer helpline 8826004211 shown as tap-to-call card on subscriber Home & Profile (src/components/HelplineCard.tsx).
-
-## SMS OTP + WhatsApp (added)
-- Backend supports MSG91 OTP (send `POST control.msg91.com/api/v5/otp`, verify `GET /api/v5/otp/verify`) and Traccar SMS Gateway (Android SIM phone via `TRACCAR_SMS_URL` + `TRACCAR_SMS_API_KEY`). Traccar is the active priority provider when configured; it generates a secure 6-digit OTP, hashes it in MongoDB, expires it after 5 minutes, and limits verification to five attempts. MSG91 is used when Traccar is not configured.
-- Phone normalization (+91/0 prefix), 30s resend cooldown for real SMS, `GET /api/auth/config`.
-- OTP screen: mode-aware subtitle + "OTP फिर से भेजें" resend button with 30s countdown.
-- HelplineCard: Call + WhatsApp (wa.me/918826004211) buttons on subscriber Home & Profile.
-- Demo numbers and Admin/Super Admin remain on demo OTP `123456`; non-demo Subscriber/Team numbers use the active SMS provider. Traccar also sends plan activation/payment, payment-submission, complaint creation/update/assignment, and expiry reminder messages without rolling back completed app actions when gateway delivery fails.
-
-## Subscriber management (Super Admin only)
-- `POST /api/subscribers` {phone,name,address?} and `DELETE /api/subscribers/{id}` — require_role("super_admin"); delete also removes their subscriptions & complaints.
-- Admin "Users" tab: add FAB + bottom-sheet form and per-row delete (with confirm) visible only to super_admin; admin/team see read-only list.
-
-## Deployment
-- Root-level GET / and GET /health (plus /api/health) return 200 for platform health probes.
-
-## Complaint automation (fix: technicians saw no tickets)
-- New complaints auto-assign to the least-loaded technician (status=assigned, auto_assigned=true). Admin toggle: GET/PATCH /api/settings {auto_assign} (stored in db.settings), Switch on admin Tickets screen.
-- Technicians now see own tickets + unassigned open tickets; can "Accept Ticket" (self-claim via PATCH assigned_to=self). Team screen has NEW / ACTIVE / RESOLVED segments.
-
-## Iteration 5 (user-reported)
-- Admin/Super Admin can Close (resolve) / Reopen tickets from admin Tickets sheet with optional note.
-- Overview: crash-guard when metrics fail (error + Retry), metric cards tappable → navigate to Users/Team/Tickets tabs, pull-to-refresh.
-- Subscriber details: User model + router_model, router_mac, security_deposit, installation_date, notes. PATCH /api/subscribers/{id} (edit), POST /api/subscribers/{id}/assign-plan {plan_id, payment_mode cash|upi|free} (shared activate_plan() also used by /recharge; Invoice.payment_mode added). Create form can activate a plan immediately.
-- Users tab: search bar (name/phone/address), detail sheet (Assign/Renew Plan, Edit, Delete for super_admin).
-- Timing fix: Mongo client tz_aware=True → all datetimes serialize with +00:00 so the app shows correct local (IST) time.
-
-## UPI payment with screenshot verification (replaces mock instant recharge)
-- UPI_ID=9312004211-2@ybl, UPI_PAYEE_NAME in backend/.env → GET /api/payment-config.
-- Subscriber Recharge: plan → sheet with UPI QR (upi://pay deep link), UPI ID copy, "Pay via UPI app" (native), screenshot picker (expo-image-picker w/ permission flow + Open Settings), optional UTR → POST /api/payments/upload-screenshot (multipart → Emergent Object Storage, path broadband-solutions-247/uploads/{uid}/{uuid}.ext, meta in db.files) → POST /api/payments (pending). One pending per user. "My Payments" history with status.
-- Admin "Payments" tab: list pending/all with screenshot thumbnails (GET /api/files/{path}?token= for web, Authorization header on native). Super Admin only: Approve (activate_plan → invoice+subscription, payment_mode upi, utr) / Reject with reason. Admin can view only.
-- POST /api/recharge now returns 410 (instant mock disabled).
-
-## Alerts, expiry reminders, delete account
-- GET /api/badges (role-aware): team {new_tickets}, admin/super {pending_payments, open_tickets, expiring_soon}, subscriber {expiring_soon, days_left}. Frontend hook src/hooks/useBadges.ts polls every 30s (foreground only) → tabBarBadge on Team "Tickets" and Admin "Payments" tabs.
-- GET /api/admin/expiring?days=3 → subscribers whose active plan expires within N days; shown on Admin Overview "Expiring in 3 days" card (tap row = call). Subscriber Home shows amber/red expiry banner when ≤3 days left (tap → Recharge).
-- DELETE /api/auth/me → self-delete (super_admin blocked 403): removes user, subscriptions, pending payments, chat; anonymises invoices/complaints/payments; unassigns tickets. Profile: "Delete my account" with confirm (Alert native / modal web) → logout.
-
-## Current increment: dashboard payments, foreground tones, plan refresh
-- User chose ONLY dashboard UPI shortcut, payment history and sound alerts. No new cash-entry flow; earlier four unfinished features explicitly deferred.
-- Reported bug: Super Admin plan activation not visible in subscriber app. RCA found backend correct, Home refreshed only on navigation. `useLiveRefresh` now refreshes Home while focused every 10s and on app resume, with error/retry UI retaining previous data.
-- `/api/payment-history`: role-scoped, paginated unified invoice/payment-request ledger. All/UPI/Cash/Free filter, literal search, approval receipt deduplication; subscribers only see own records, admins all customers. New response models in `backend/payment_activity.py` exclude BSON IDs.
-- Dashboard `PaymentDashboardCard`: UPI shortcut (subscriber recharge / admin review queue), UPI ID copy, full payment history shortcut. `/payment-history` screen shows mode, amount, status, date, customer name/phone for admins, invoice links. Invoice detail displays payment mode.
-- `/api/activity`: role-scoped complaint/payment ID+version snapshots. `ActivityAlertsProvider` polls every 10s while foreground; first fetch silent; unchanged polls silent, per-user persisted mute setting. Bundled original complaint/payment WAVs use expo-audio. Complaint and payment alerts loop for about 9 seconds, then stop automatically; new alerts, muting, backgrounding, logout, and navigation cancel the active loop. Test-tone buttons and latest alert shown on dashboards/team Profile.
-- No microphone, recording, background audio, or push capabilities added. Sound while app closed is not implemented; real-device speaker/silent-mode behavior needs device validation.
-- Frontend Expo config exposes backend URL via `Constants.expoConfig.extra.backendUrl`, sourced from existing environment variable. Protected Metro/env settings unchanged.
-- Verification COMPLETE for requested scope: iter8 10/11 backend checks passed, failed role fixture repaired and passed recheck in iter9; iter9 focused backend3/3 plus requested UI flows passed. Live plan update without navigation, automatic complaint/payment audio events, silent initial/unchanged snapshots, mute persistence/account isolation, subscriber-local updates, team scope, admin/super permissions, history filters/search/invoice modes all verified. Modal verified390x844 and320x700. Native speaker behavior still requires a phone check.
-- Iter9 optional follow-ups addressed: sound ON/OFF indicator and checked accessibility state; payment screenshot rendering waits for token. Final self-test observed real image pixels and3/3 authenticated file responses HTTP200 (no401 observed).
-- Existing Recharge modal made phone-height constrained with internal scroll, fixed submit/cancel footer and top close. Documented Admin/Team demo test fixtures restored by explicit exact-ID operator script, not via login/startup privileges; both API role logins verified.
+## Known Infrastructure Limitation
+- The public preview ingress/proxy still alters CORS: local FastAPI preflight honors the exact allowlist, but the preview layer injects wildcard GET headers and rejects OPTIONS before app code runs. Keep the app allowlist strict; upstream proxy configuration needs correction.
 
 ## Backlog
-- P0: Verify live Traccar SMS delivery on a non-demo Subscriber/Team number. The cloud backend can reach the configured ngrok tunnel and provider mode is active; user must keep the Android gateway and ngrok tunnel online, then confirm receipt/OTP verification. Rotate the gateway API key that was exposed in chat once validation is complete.
-- P1 (deferred by user): Prior Expiry SMS, Collection Report, Technician Location and Plan Editor end-to-end verification; prior report.tsx hook warning. SMS requires MSG91 credentials/templates; no SMS delivery verified.
-- P2: Closed-app push notifications; optional new cash-entry flow only if requested.
+- **P0:** Configure MSG91 Auth Key, OTP Template/Flow ID and DLT Template ID; then test a real non-privileged customer OTP flow.
+- **P0:** Correct preview ingress/proxy CORS mutation without weakening app CORS.
+- **P1:** Optional collection reporting, extended technician/location validation and plan-editor verification.
+- **P2:** Closed-app push notifications for complaint assignments/status changes.

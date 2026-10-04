@@ -209,6 +209,7 @@ metadata:
   run_ui: true
 test_plan:
   current_focus:
+    - "Security remediation: static-demo OTP removal, expiring/revocable JWT, rate limits, CORS and role-based invoice access"
     - "Traccar delivery and OTP verification on a non-demo Subscriber or Team phone"
     - "Live subscriber plan update from Super Admin assignment, without navigation/manual refresh"
     - "UPI/Cash history and role isolation, deduplication and filters"
@@ -228,3 +229,11 @@ agent_communication:
     message: "Iteration9 all requested critical flows pass. Addressed optional findings: explicit ON/OFF and accessibility checked state; screenshot images render only with token. Final mobile self-test verifies toggle state and actual screenshot image pixels, 3 authenticated image responses HTTP200, zero observed401s. Report iteration_9.json reviewed; tester changed only tests/reports/credentials. No new integration mocked; existing demo OTP and deferred previous features unchanged."
   - agent: main
     message: "Traccar SMS integration configured through the user-provided public ngrok tunnel. Python lint, py_compile, backend health, provider-enabled config, and Admin mock OTP request all pass. Real SMS delivery requires an end-user non-demo SIM test while Traccar and ngrok remain running; do not use the testing agent until a consented test number is available."
+  - agent: security_audit
+    message: "Audit FAIL: confirmed critical static/demo OTP admin takeover; medium non-expiring JWT plus file query-token leakage; lower-priority permissive credentialed CORS, missing auth throttling, missing headers, and team invoice BOLA."
+  - agent: main
+    message: "Applied security remediation pending independent validation: production-only no-demo OTP, no OTP response payload, real-provider fail-closed auth; expiring jti JWT + Mongo logout revocation; request/verify phone+hashed-IP throttles; header-auth-only file endpoint; team invoice restriction; CORS origin allowlist and security headers; no public seeded default privileged accounts. Existing Traccar config disabled because its exposed/failed gateway cannot securely provide login; MSG91 credentials are required before live authentication is usable."
+  - agent: testing
+    message: "Iteration 11 security retest passed 10/10 backend and 2/2 frontend checks. App-side security remediation is verified; public preview CORS mutation is upstream infrastructure, while local FastAPI strict CORS works correctly."
+  - agent: testing
+    message: "Iteration 12 provider-off regression passed 8/8 backend checks. Verify/request OTP both fail closed (503) and rate-limit (429) without making MSG91/Traccar calls; demo leakage, JWT revocation, query-token denial and invoice role boundaries remain protected."

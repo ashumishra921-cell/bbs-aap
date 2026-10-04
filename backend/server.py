@@ -783,6 +783,27 @@ async def my_subscription(user: dict = Depends(get_current_user)):
     return sub
 
 
+@api_router.get("/me/pending-balance")
+async def my_pending_balance(user: dict = Depends(require_role("subscriber"))):
+    active = await db.subscriptions.find_one({"user_id": user["id"], "status": "active"}, {"_id": 0, "id": 1})
+    if active:
+        return {"amount": 0.0, "status": "clear", "plan_name": None, "expired_at": None}
+    expired = await db.subscriptions.find_one(
+        {"user_id": user["id"], "status": "expired"},
+        {"_id": 0},
+        sort=[("expires_at", -1)],
+    )
+    if not expired:
+        return {"amount": 0.0, "status": "clear", "plan_name": None, "expired_at": None}
+    plan = await db.plans.find_one({"id": expired["plan_id"]}, {"_id": 0, "price": 1})
+    return {
+        "amount": float((plan or {}).get("price", 0)),
+        "status": "due",
+        "plan_name": expired["plan_name"],
+        "expired_at": expired["expires_at"],
+    }
+
+
 async def activate_plan(user: dict, plan: dict, payment_mode: str, upi_id: Optional[str] = None) -> dict:
     now = datetime.now(timezone.utc)
     invoice_no = f"INV-{now.strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}"

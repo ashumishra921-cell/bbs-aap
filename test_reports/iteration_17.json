@@ -1,0 +1,46 @@
+{
+  "summary": "Iteration 17 tested pending-balance and admin dues regressions across backend + frontend source/UI checks. Backend API behavior matched required rules for active/expired/no-subscription states, role authorization, dues dedupe, and non-mutation. Frontend source wiring for pending balance card/testIDs and Admin ‘Pending Balance’ labeling is present; login UI smoke loaded successfully on mobile viewport.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Subscriber Home pending balance card",
+        "issues": [
+          "pending-balance-recharge button minHeight is 40 (<44 touch-target guideline)."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter17_pending_balance_and_report.py",
+    "/app/test_reports/pytest/iter17_pending_balance_report.xml",
+    "/app/test_reports/artifacts_iter17_ui/mobile_login_loaded_hindi.jpeg"
+  ],
+  "action_items": [
+    "Increase pending-balance-recharge touch target to minimum 44px height for mobile accessibility.",
+    "Optional hardening: align frontend API base usage to protected EXPO_BACKEND_URL naming to avoid env-key drift (api.ts currently uses expoConfig.extra.backendUrl / EXPO_PUBLIC_BACKEND_URL)."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py remains a large monolithic file (>1500 lines), which increases regression risk for auth/billing changes.",
+    "frontend/src/api.ts does not directly use EXPO_BACKEND_URL key referenced by platform testing rules; this can cause deployment/config mismatch risk."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter17_pending_balance_and_report.py",
+    "/app/test_reports/iteration_17.json"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7)",
+    "frontend": "100% for requested source/login-smoke checks (authenticated UI flow intentionally not executed)"
+  },
+  "seed_data_creation": "Created TEST_ITER17-scoped users/plans/subscriptions in test fixture and cleaned them in teardown. Used ephemeral local JWTs only.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Read /app/memory/test_credentials.md first. /app/auth_testing.md is absent in workspace. This run intentionally avoided interactive OTP login per safety note. WhatsBoost external messaging stayed MOCKED/untouched for this scope (no live send triggered by tested read endpoints).",
+  "rca_of_issue": "No functional backend defect found in requested scope. Pending-balance and admin dues logic work as intended: active subscription short-circuits to clear, latest expired drives due amount from current plan price, and dues report de-duplicates by latest expired subscription for users without active plans while preserving data immutability on reads."
+}

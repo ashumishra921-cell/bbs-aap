@@ -96,6 +96,7 @@ export const api = {
   stopMyLocation: () => request<any>("/team/location", { method: "DELETE" }),
 
   mySubscription: () => request<any | null>("/me/subscription"),
+  myPendingBalance: () => request<{ amount: number; status: "clear" | "due"; plan_name: string | null; expired_at: string | null }>("/me/pending-balance"),
 
   paymentConfig: () => request<{ upi_id: string; payee_name: string }>("/payment-config"),
   uploadScreenshot: async (uri: string, name: string, type: string) => {

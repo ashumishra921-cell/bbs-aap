@@ -253,5 +253,11 @@ agent_communication:
     message: "Iteration 15 expiry-template scheduler verification passed 8/8 with WhatsBoost MOCKED: exact multipart mapping, IST +2-day eligibility, idempotency, opt-out/default-enabled behavior, failure safety, legacy-route exclusion and admin payload secrecy all passed."
   - agent: main
     message: "User-confirmed Super Admin phone migration executed: existing target Admin had zero linked business records, so it was archived (not deleted); Super Admin immutable user id retained and phone moved to suffix 4211. Old suffix 9999 was added to retired_phones and its OTP challenges removed. Code now blocks retired phones and archived-user sessions. Self-check: old auth request 403; target role super_admin; archived account JWT 401."
+  - agent: main
+    message: "Pending balance feature added while push notification setup is deferred awaiting Firebase JSON. Subscriber Home now shows own expired-plan renewal due (or ₹0 clear state) via /api/me/pending-balance; Admin Collection Report labels existing customer-wise expired/non-renewed follow-up dues as Pending Balance. Self-check: subscriber endpoint 200 with amount/status and preview login renders."
+  - agent: testing
+    message: "Iteration 17 Pending Balance regression passed 7/7 backend scenarios and frontend source/UI checks; external messaging remained MOCKED/untouched."
+  - agent: testing
+    message: "Iteration 18 independently confirmed the reported Pay touch-target defect is fixed at minHeight 44; preview smoke passed and no WhatsBoost message was sent. Authenticated runtime due-card proof remains deferred because no safe session/token was supplied."
   - agent: testing
     message: "Iteration 16 Super Admin phone migration regression passed 5/5 with WhatsBoost MOCKED. Unique active Super Admin identity, archived prior Admin/data preservation, retired old-number provider bypass, archived-session rejection and health/auth config all passed. No live WhatsApp send was performed."

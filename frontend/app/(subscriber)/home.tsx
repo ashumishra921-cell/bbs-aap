@@ -20,6 +20,7 @@ export default function SubscriberHome() {
   const insets = useSafeAreaInsets();
   const [user, setUser] = useState<User | null>(null);
   const [sub, setSub] = useState<any | null>(null);
+  const [pendingBalance, setPendingBalance] = useState<{ amount: number; status: "clear" | "due"; plan_name: string | null; expired_at: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,8 +29,9 @@ export default function SubscriberHome() {
     try {
       const { user } = await loadAuth();
       setUser(user);
-      const s = await api.mySubscription();
+      const [s, balance] = await Promise.all([api.mySubscription(), api.myPendingBalance()]);
       setSub(s);
+      setPendingBalance(balance);
       setError(null);
     } catch (e: any) {
       setError(e.message || "Plan load नहीं हुआ। फिर कोशिश करें।");
@@ -73,6 +75,27 @@ export default function SubscriberHome() {
             <Text style={{ color: colors.brandPrimary, fontWeight: "700" }}>Retry</Text>
           </Pressable>
         </View>}
+        {!loading && pendingBalance && (
+          <View style={[styles.balanceCard, { borderColor: pendingBalance.status === "due" ? colors.error : colors.success }]} testID="pending-balance-card">
+            <View style={[styles.balanceIcon, { backgroundColor: pendingBalance.status === "due" ? "#FEE2E2" : "#D1FAE5" }]}>
+              <Ionicons name={pendingBalance.status === "due" ? "wallet-outline" : "checkmark-circle-outline"} size={22} color={pendingBalance.status === "due" ? colors.error : colors.success} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.balanceLabel}>Pending Balance</Text>
+              <Text style={[styles.balanceAmount, { color: pendingBalance.status === "due" ? colors.error : colors.success }]} testID="pending-balance-amount">
+                ₹{Number(pendingBalance.amount || 0).toLocaleString("en-IN")}
+              </Text>
+              <Text style={styles.balanceSub} testID="pending-balance-status">
+                {pendingBalance.status === "due" ? `${pendingBalance.plan_name || "Plan"} renew करने के लिए payable` : "कोई pending balance नहीं है"}
+              </Text>
+            </View>
+            {pendingBalance.status === "due" && (
+              <Pressable onPress={() => router.push("/(subscriber)/recharge")} style={styles.balancePayBtn} testID="pending-balance-recharge">
+                <Text style={styles.balancePayTxt}>Pay</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
         {loading ? (
           <ActivityIndicator style={{ marginTop: 40 }} color={colors.brandPrimary} />
         ) : sub ? (
@@ -203,6 +226,13 @@ const useStyles = makeStyles((colors) => ({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  balanceCard: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14, backgroundColor: colors.surfaceSecondary, borderRadius: 16, borderWidth: 1, marginBottom: 12 },
+  balanceIcon: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  balanceLabel: { color: colors.muted, fontSize: 12, fontWeight: "700", textTransform: "uppercase" },
+  balanceAmount: { fontSize: 22, fontWeight: "900", marginTop: 1 },
+  balanceSub: { color: colors.muted, fontSize: 11, marginTop: 2 },
+  balancePayBtn: { minWidth: 48, minHeight: 44, borderRadius: 10, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center", paddingHorizontal: 10 },
+  balancePayTxt: { color: "#FFFFFF", fontSize: 12, fontWeight: "800" },
   planHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 },
   planLabel: { fontSize: 12, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.5 },
   planName: { fontSize: 20, fontWeight: "800", color: colors.onSurface, marginTop: 2 },

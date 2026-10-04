@@ -34,7 +34,7 @@ export default function CollectionReport() {
     } finally {
       setLoading(false);
     }
-  }, [month]);
+  }, [month, toast]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -83,7 +83,7 @@ export default function CollectionReport() {
             <Stat label="UPI" value={inr(modes.upi?.amount)} sub={`${modes.upi?.count || 0} payments`} icon="qr-code" tint={colors.brandPrimary} testID="stat-upi" />
             <Stat label="Cash" value={inr(modes.cash?.amount)} sub={`${modes.cash?.count || 0} payments`} icon="cash" tint={colors.success} testID="stat-cash" />
             <Stat label="Pending Verification" value={inr(data.pending_verification.amount)} sub={`${data.pending_verification.count} screenshots`} icon="hourglass" tint={colors.warning} testID="stat-pending" />
-            <Stat label="Dues (expired, not renewed)" value={inr(data.dues.amount)} sub={`${data.dues.count} customers`} icon="alert-circle" tint={colors.error} testID="stat-dues" />
+            <Stat label="Pending Balance" value={inr(data.dues.amount)} sub={`${data.dues.count} customers`} icon="alert-circle" tint={colors.error} testID="stat-dues" />
           </View>
 
           {data.daily.length > 0 && (
@@ -101,7 +101,7 @@ export default function CollectionReport() {
           )}
 
           <View style={styles.card} testID="dues-card">
-            <Text style={styles.cardTitle}>Dues — Follow up ({data.dues.count})</Text>
+            <Text style={styles.cardTitle}>Pending Balance — Follow up ({data.dues.count})</Text>
             {data.dues.items.length === 0 ? (
               <Text style={styles.empty}>कोई बकाया नहीं 🎉</Text>
             ) : data.dues.items.map((d: any) => (

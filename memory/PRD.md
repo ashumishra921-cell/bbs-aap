@@ -10,6 +10,7 @@ Mobile ISP management app for Super Admin, Admin, Team Members and Subscribers. 
 
 ## Implemented
 - Role-scoped dashboards, subscriptions, plan management, customer/team management, UPI screenshot review, invoices, reports and payment history.
+- Pending Balance: Subscriber Home shows ₹0 clear state or the latest expired-plan renewal amount with a Recharge action; Admin Collection Report provides the customer-wise Pending Balance follow-up list.
 - Complaint creation, automatic/administrative assignment, team work states, location sharing and status updates.
 - Foreground complaint and payment audio alerts with a visible switch, test controls and ~9-second repeat/automatic-stop playback.
 - Subscriber Home refreshes while focused so new plan activations become visible without manual navigation.
@@ -33,4 +34,4 @@ Mobile ISP management app for Super Admin, Admin, Team Members and Subscribers. 
 - **P0:** Rotate the WhatsBoost credentials shared in chat, update backend-only `WHATSBOOST_APPKEY`/`WHATSBOOST_AUTHKEY`, then run one manual OTP and opted-in transaction-message check with an explicitly consented recipient. Provider HTTP acceptance is not a delivery receipt.
 - **P0:** Correct preview ingress/proxy CORS mutation without weakening app CORS.
 - **P1:** Optional collection reporting, extended technician/location validation and plan-editor verification.
-- **P2:** Closed-app push notifications for complaint assignments/status changes.
+- **P1:** Closed-app notification sounds await Firebase `google-services.json`; planned routing is Admin/Super Admin (payment + complaint), Team (assigned complaint), and Subscriber (own relevant updates).

@@ -52,6 +52,8 @@ WHATSBOOST_APPKEY = os.environ.get('WHATSBOOST_APPKEY', '').strip()
 WHATSBOOST_AUTHKEY = os.environ.get('WHATSBOOST_AUTHKEY', '').strip()
 WHATSBOOST_NAME = os.environ.get('WHATSBOOST_NAME', 'Broadband Solutions 24x7').strip()
 WHATSBOOST_ENABLED = bool(WHATSBOOST_URL and WHATSBOOST_APPKEY and WHATSBOOST_AUTHKEY)
+WHATSBOOST_EXPIRY_TEMPLATE_ID = os.environ.get('WHATSBOOST_EXPIRY_TEMPLATE_ID', '').strip()
+WHATSBOOST_EXPIRY_TEMPLATE_ENABLED = bool(WHATSBOOST_ENABLED and WHATSBOOST_EXPIRY_TEMPLATE_ID)
 OTP_PROVIDER_ENABLED = WHATSBOOST_ENABLED
 OTP_RESEND_COOLDOWN_SEC = 30
 OTP_TTL_MINUTES = 5
@@ -448,6 +450,51 @@ async def send_whatsboost_otp(phone: str, name: str) -> None:
     except HTTPException:
         await db.otp_challenges.delete_one({"phone": phone})
         raise
+
+
+async def send_expiry_template(user: dict, subscription: dict, expiry_date: str, amount: float) -> bool:
+    """Send the approved two-day expiry template once for an opted-in subscriber."""
+    if not WHATSBOOST_EXPIRY_TEMPLATE_ENABLED or not user.get("whatsapp_updates", True):
+        return False
+    event_key = f"expiry_template:{subscription['id']}:{subscription['expires_at'].isoformat()}"
+    now = datetime.now(timezone.utc)
+    try:
+        await db.whatsapp_notifications.insert_one({
+            "event_key": event_key, "user_id": user["id"], "phone_suffix": user["phone"][-4:],
+            "category": "expiry_template", "status": "sending", "created_at": now,
+        })
+    except DuplicateKeyError:
+        return False
+    billed_amount = f"₹{amount:,.0f}" if float(amount).is_integer() else f"₹{amount:,.2f}"
+    form = {
+        "appkey": WHATSBOOST_APPKEY,
+        "authkey": WHATSBOOST_AUTHKEY,
+        "to": f"91{user['phone']}",
+        "name": user["name"][:100],
+        "template_id": WHATSBOOST_EXPIRY_TEMPLATE_ID,
+        "variables[{1}]": user["name"],
+        "variables[{2}]": expiry_date,
+        "variables[{3}]": billed_amount,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=8.0, read=15.0, write=10.0, pool=10.0), trust_env=False) as http:
+            response = await http.post(WHATSBOOST_URL, data=form)
+        status = "submitted" if 200 <= response.status_code < 300 else "failed"
+        await db.whatsapp_notifications.update_one(
+            {"event_key": event_key},
+            {"$set": {"status": status, "provider_http": response.status_code, "updated_at": datetime.now(timezone.utc)}},
+        )
+        if status == "failed":
+            logger.warning("Expiry template rejected: status=%s", response.status_code)
+        return status == "submitted"
+    except httpx.TimeoutException:
+        await db.whatsapp_notifications.update_one({"event_key": event_key}, {"$set": {"status": "unknown", "updated_at": datetime.now(timezone.utc)}})
+        logger.warning("Expiry template timeout")
+        return False
+    except httpx.HTTPError as exc:
+        await db.whatsapp_notifications.update_one({"event_key": event_key}, {"$set": {"status": "unknown", "updated_at": datetime.now(timezone.utc)}})
+        logger.warning("Expiry template connection failure: %s", type(exc).__name__)
+        return False
 
 
 async def send_traccar_otp(phone: str) -> None:
@@ -1403,54 +1450,46 @@ async def send_expiry_sms(phone: str, name: str, plan: str, days: int, expires: 
 
 
 async def run_expiry_reminders() -> dict:
-    """Send one reminder per subscription when it enters the 3-day expiry window."""
+    """Send the approved WhatsBoost template on the calendar date two days before expiry."""
     now = datetime.now(timezone.utc)
+    india_tz = timezone(timedelta(hours=5, minutes=30))
+    target_expiry_date = now.astimezone(india_tz).date() + timedelta(days=2)
     subs = await db.subscriptions.find({
         "status": "active",
-        "expires_at": {"$lte": now + timedelta(days=EXPIRY_WINDOW_DAYS), "$gt": now},
-        "reminder_sent_at": {"$exists": False},
+        "expires_at": {"$lte": now + timedelta(days=3), "$gt": now + timedelta(days=1)},
+        "whatsapp_expiry_template_sent_at": {"$exists": False},
     }, {"_id": 0}).to_list(500)
     sent = skipped = failed = 0
     for s in subs:
         u = await db.users.find_one({"id": s["user_id"]}, {"_id": 0, "id": 1, "name": 1, "phone": 1, "whatsapp_updates": 1})
         if not u:
             continue
-        days = max(0, (s["expires_at"] - now).days)
+        expiry_date = s["expires_at"].astimezone(india_tz)
+        if expiry_date.date() != target_expiry_date:
+            continue
+        plan = await db.plans.find_one({"id": s["plan_id"]}, {"_id": 0, "price": 1})
+        amount = float((plan or {}).get("price", 0))
         log = {
             "id": str(uuid.uuid4()), "subscription_id": s["id"], "user_id": s["user_id"], "name": u["name"], "phone": u["phone"],
-            "plan_name": s["plan_name"], "expires_at": s["expires_at"], "days_left": days, "created_at": now, "channel": "sms",
+            "plan_name": s["plan_name"], "expires_at": s["expires_at"], "days_left": 2, "amount": amount, "created_at": now, "channel": "whatsapp_template",
         }
-        expiry_date = s["expires_at"].astimezone(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %Y")
-        whatsapp_sent = await send_whatsapp_notification(
-            u,
-            f"expiry_reminder:{s['id']}",
-            f"Broadband Solutions 24x7: नमस्ते {u['name']}, आपका {s['plan_name']} प्लान {expiry_date} को समाप्त हो रहा है ({days} दिन बाकी)। समय पर रिचार्ज करें। सहायता: 8826004211",
-        )
-        if not EXPIRY_SMS_ENABLED or u["phone"] in DEMO_NUMBERS:
-            if whatsapp_sent:
+        try:
+            delivered = await send_expiry_template(u, s, expiry_date.strftime("%d %b %Y"), amount)
+            if delivered:
                 log["status"] = "sent"
-                log["channel"] = "whatsapp"
                 sent += 1
             else:
                 log["status"] = "skipped"
-                log["detail"] = "No opted-in WhatsApp recipient or SMS gateway configured" if not EXPIRY_SMS_ENABLED else "demo number"
+                log["detail"] = "No opted-in WhatsApp recipient or expiry template configured"
                 skipped += 1
-        else:
-            try:
-                await send_expiry_sms(u["phone"], u["name"], s["plan_name"], days, expiry_date)
-                log["status"] = "sent"
-                if whatsapp_sent:
-                    log["channel"] = "sms+whatsapp"
-                sent += 1
-            except Exception as e:
-                logger.error(f"Expiry SMS failed for {u['phone']}: {e}")
-                log["status"] = "failed"
-                log["detail"] = str(e)[:200]
-                failed += 1
+        except Exception as exc:
+            logger.error("Expiry template preparation failed: %s", type(exc).__name__)
+            log["status"] = "failed"
+            failed += 1
         await db.reminders.insert_one(log)
         if log["status"] != "failed":
-            await db.subscriptions.update_one({"id": s["id"]}, {"$set": {"reminder_sent_at": now, "reminder_status": log["status"]}})
-    return {"checked": len(subs), "sent": sent, "skipped": skipped, "failed": failed, "sms_enabled": EXPIRY_SMS_ENABLED}
+            await db.subscriptions.update_one({"id": s["id"]}, {"$set": {"whatsapp_expiry_template_sent_at": now, "whatsapp_expiry_template_status": log["status"]}})
+    return {"checked": len(subs), "sent": sent, "skipped": skipped, "failed": failed, "whatsapp_template_enabled": WHATSBOOST_EXPIRY_TEMPLATE_ENABLED}
 
 
 async def reminder_loop():
@@ -1467,7 +1506,7 @@ async def reminder_loop():
 @api_router.get("/admin/reminders")
 async def list_reminders(user: dict = Depends(require_role("admin", "super_admin"))):
     items = await db.reminders.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    return {"sms_enabled": EXPIRY_SMS_ENABLED, "items": items}
+    return {"whatsapp_template_enabled": WHATSBOOST_EXPIRY_TEMPLATE_ENABLED, "items": items}
 
 
 @api_router.post("/admin/reminders/run")

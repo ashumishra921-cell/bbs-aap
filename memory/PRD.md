@@ -15,6 +15,7 @@ Mobile ISP management app for Super Admin, Admin, Team Members and Subscribers. 
 - Subscriber Home refreshes while focused so new plan activations become visible without manual navigation.
 - UPI files are stored in managed object storage and accessed using Authorization bearer headers only.
 - WhatsBoost sends login OTP plus plan activation, payment submission/confirmation, complaint updates and expiry reminders. Login codes are server-side hashed, six digits, five-minute expiry and five-attempt maximum; transaction messages are idempotent by business event and never roll back core business actions. Subscriber WhatsApp updates default ON and can be switched OFF from Profile.
+- Expiry reminders use approved WhatsBoost template `6ac1fddef3f1df9b9465836c` on the IST calendar date exactly two days before plan expiry. Mapping: `{1}` subscriber name, `{2}` expiry date, `{3}` current plan billing amount. Generic/SMS expiry dispatch is not used by the active scheduler.
 
 ## Security Status — Iteration 11
 - Production authentication is **real-provider-only**: public demo OTP, shared `123456`, role bypasses and seeded privileged demo accounts are disabled.

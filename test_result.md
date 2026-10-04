@@ -247,3 +247,7 @@ agent_communication:
     message: "Iteration 14 WhatsBoost-only OTP verification passed 11/11 backend tests with provider MOCKED. Multipart payload, hashed/expiring challenge, success/wrong/capped/expired flows, timeout/4xx cleanup, no OTP leakage, WhatsBoost-only provider routing, and throttles passed. Frontend WhatsApp OTP copy/no-demo disclosure check passed. Live delivery remains intentionally untested without recipient consent."
   - agent: main
     message: "Backend access log recorded a WhatsBoost HTTP 200 acceptance during Iter14 against a seeded test number. This is provider acceptance only, not an end-user delivery receipt; do not run further live sends without explicit recipient consent. OTP log label corrected from sms to whatsapp for operational clarity."
+  - agent: main
+    message: "Added approved WhatsBoost expiry template `6ac1fddef3f1df9b9465836c` for calendar-date two-days-before-expiry reminders. Numeric mapping: variables[{1}]=subscriber name, variables[{2}]=IST expiry date, variables[{3}]=plan billing amount. Existing generic/SMS expiry reminders are no longer used by the scheduler; live template delivery must remain mocked unless a recipient explicitly consents."
+  - agent: testing
+    message: "Iteration 15 expiry-template scheduler verification passed 8/8 with WhatsBoost MOCKED: exact multipart mapping, IST +2-day eligibility, idempotency, opt-out/default-enabled behavior, failure safety, legacy-route exclusion and admin payload secrecy all passed."

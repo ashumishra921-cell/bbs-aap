@@ -22,6 +22,7 @@ Mobile ISP management app for Super Admin, Admin, Team Members and Subscribers. 
 - WhatsBoost-only OTP fails closed when backend credentials are absent; it has no MSG91 or Traccar fallback.
 - OTP endpoints have phone + hashed-IP throttles; responses never return an OTP.
 - JWTs require `exp` + `jti`, expire after `JWT_TTL_MINUTES`, and logout stores a server-side revocation record. Legacy non-expiring tokens are rejected.
+- Super Admin phone migrations preserve the immutable Super Admin user id, archive a conflicting empty target account rather than deleting data, invalidate OTP challenges, block the retired number from OTP, and reject archived-account sessions.
 - Team members cannot access other users' invoices. File query-token access is rejected. CORS is strict in FastAPI, credentials are disabled, and standard security headers are attached.
 - Independent Iter11 regression passed: **10/10 backend** and **2/2 frontend** security checks.
 

@@ -251,3 +251,7 @@ agent_communication:
     message: "Added approved WhatsBoost expiry template `6ac1fddef3f1df9b9465836c` for calendar-date two-days-before-expiry reminders. Numeric mapping: variables[{1}]=subscriber name, variables[{2}]=IST expiry date, variables[{3}]=plan billing amount. Existing generic/SMS expiry reminders are no longer used by the scheduler; live template delivery must remain mocked unless a recipient explicitly consents."
   - agent: testing
     message: "Iteration 15 expiry-template scheduler verification passed 8/8 with WhatsBoost MOCKED: exact multipart mapping, IST +2-day eligibility, idempotency, opt-out/default-enabled behavior, failure safety, legacy-route exclusion and admin payload secrecy all passed."
+  - agent: main
+    message: "User-confirmed Super Admin phone migration executed: existing target Admin had zero linked business records, so it was archived (not deleted); Super Admin immutable user id retained and phone moved to suffix 4211. Old suffix 9999 was added to retired_phones and its OTP challenges removed. Code now blocks retired phones and archived-user sessions. Self-check: old auth request 403; target role super_admin; archived account JWT 401."
+  - agent: testing
+    message: "Iteration 16 Super Admin phone migration regression passed 5/5 with WhatsBoost MOCKED. Unique active Super Admin identity, archived prior Admin/data preservation, retired old-number provider bypass, archived-session rejection and health/auth config all passed. No live WhatsApp send was performed."

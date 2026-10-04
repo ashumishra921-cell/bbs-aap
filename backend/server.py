@@ -261,6 +261,8 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if user.get("account_status") == "archived":
+        raise HTTPException(status_code=401, detail="Session expired")
     return user
 
 
@@ -325,6 +327,11 @@ async def enforce_auth_limit(action: str, phone: str, request: Request, limit: i
         {"bucket": bucket, "key": key, "created_at": now, "expires_at": now + timedelta(minutes=window_minutes)}
         for bucket, key in keys
     ])
+
+
+async def ensure_phone_is_active(phone: str) -> None:
+    if await db.retired_phones.find_one({"phone": phone}, {"_id": 0, "phone": 1}):
+        raise HTTPException(status_code=403, detail="यह नंबर अब इस खाते के लिए उपयोग नहीं किया जा सकता")
 
 
 def otp_digest(phone: str, otp: str) -> str:
@@ -634,6 +641,7 @@ async def auth_config():
 @api_router.post("/auth/request-otp")
 async def request_otp(body: RequestOtpBody, request: Request):
     phone = normalize_phone(body.phone)
+    await ensure_phone_is_active(phone)
     user = await db.users.find_one({"phone": phone}, {"_id": 0})
     mock = uses_mock_otp(phone, user)
     await enforce_auth_limit("otp_send", phone, request, limit=5, window_minutes=15)
@@ -666,6 +674,7 @@ async def request_otp(body: RequestOtpBody, request: Request):
 @api_router.post("/auth/verify-otp")
 async def verify_otp(body: VerifyOtpBody, request: Request):
     phone = normalize_phone(body.phone)
+    await ensure_phone_is_active(phone)
     user = await db.users.find_one({"phone": phone}, {"_id": 0})
     mock = uses_mock_otp(phone, user)
     await enforce_auth_limit("otp_verify", phone, request, limit=8, window_minutes=15)

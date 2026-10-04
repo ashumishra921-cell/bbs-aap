@@ -123,6 +123,8 @@ export const api = {
   fileUrl: (path: string) => `${BASE}/api/files/${path}`,
   createPayment: (b: { plan_id: string; screenshot_path: string; utr?: string }) =>
     request<any>("/payments", { method: "POST", body: JSON.stringify(b) }),
+  createAdminPaymentEntry: (b: { subscriber_id: string; plan_id: string; payment_mode: "cash" | "upi"; screenshot_path?: string; utr?: string }) =>
+    request<any>("/admin/payment-entries", { method: "POST", body: JSON.stringify(b) }),
   payments: () => request<any[]>("/payments"),
   approvePayment: (id: string) => request<any>(`/payments/${id}/approve`, { method: "POST" }),
   rejectPayment: (id: string, reason?: string) =>

@@ -10,6 +10,7 @@ Mobile ISP management app for Super Admin, Admin, Team Members and Subscribers. 
 
 ## Implemented
 - Role-scoped dashboards, subscriptions, plan management, customer/team management, UPI screenshot review, invoices, reports and payment history.
+- Admin/Super Admin daily collection entry: both can add subscribers, record Cash or UPI payment, and activate a plan immediately. UPI requires an actor-owned screenshot (UTR optional); Cash uses a no-screenshot payment record and is shown safely in Payments.
 - Pending Balance: Subscriber Home shows ₹0 clear state or the latest expired-plan renewal amount with a Recharge action; Admin Collection Report provides the customer-wise Pending Balance follow-up list.
 - Complaint creation, automatic/administrative assignment, team work states, location sharing and status updates.
 - Foreground complaint and payment audio alerts with a visible switch, test controls and ~9-second repeat/automatic-stop playback.

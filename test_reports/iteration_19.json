@@ -1,0 +1,65 @@
+{
+  "summary": "Iter19 backend+frontend review completed for admin daily payment entry rollout. Backend critical scenarios passed via isolated JWT + Mongo-seeded records, including cash/UPI immediate activation and screenshot ownership checks. Frontend source review found a blocking Admin UI regression for subscriber creation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Admin Add Subscriber form",
+        "issue": "Admin users can open Add Subscriber modal but cannot input phone because phone field renders only for super_admin (`!editing && isSuper`). This blocks admin subscriber creation from UI despite backend allowing it.",
+        "testID": "sub-phone",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Authenticated admin web-flow validation for Add Daily Payment + Payments fallback rendering",
+        "issue": "Runtime UI integration could not be executed in this run because no safe admin web session/token was provided and OTP/login was intentionally not invoked.",
+        "affected_testIDs": [
+          "add-subscriber-fab",
+          "assign-plan-btn",
+          "pay-cash",
+          "pay-upi",
+          "admin-payment-screenshot",
+          "admin-payment-utr",
+          "payment-cash-proof-*",
+          "cash-entry-proof"
+        ]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter19_admin_daily_payment_entries.py",
+    "/app/test_reports/pytest/iter19_admin_daily_payment_entries.xml",
+    "/app/frontend/app/(admin)/subscribers.tsx",
+    "/app/frontend/app/(admin)/payments.tsx",
+    "/app/test_reports/artifacts_iter19_ui/mobile_preview_loaded.jpeg"
+  ],
+  "action_items": [
+    "Fix admin subscriber-create form to render phone input for admin role (not only super_admin) so UI matches backend authorization.",
+    "After fix, run authenticated mobile-web Playwright for full Add Daily Payment and Admin Payments cash-fallback rendering verification.",
+    "Keep outbound WhatsBoost calls MOCKED in automated tests; current non-rollback behavior passed with MOCKED provider path."
+  ],
+  "critical_code_review_comments": [
+    "Backend: /api/admin/payment-entries enforces actor-owned screenshot for UPI and allows cash without screenshot as expected.",
+    "Frontend regression: `sub-phone` field in /app/frontend/app/(admin)/subscribers.tsx is gated by `isSuper`, conflicting with requirement that admin can create subscriber.",
+    "Config consistency note: frontend/src/api.ts derives base from expoConfig.extra.backendUrl/EXPO_PUBLIC_BACKEND_URL, while platform guidance references EXPO_BACKEND_URL."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter19_admin_daily_payment_entries.py",
+    "/app/test_reports/iteration_19.json"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8)",
+    "frontend": "50% (source-level checks passed; authenticated runtime flow not executed)"
+  },
+  "seed_data_creation": "Created isolated TEST_ITER19 users/plan/files/payments via test fixture; automatic cleanup executed in fixture teardown.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "test_credentials.md intentionally provides no privileged OTP creds; use short-lived local JWTs or provision a safe admin session for runtime UI. WhatsBoost non-rollback assertion was validated with MOCKED notification functions; no real external WhatsApp message send occurred in that test path.",
+  "rca_of_issue": "Admin create-subscriber UI bug RCA: FAB visibility uses canManage (admin/super_admin), but phone input visibility uses `isSuper` only. Repro: login as admin -> Subscribers -> tap add-subscriber-fab -> modal lacks sub-phone field -> submit cannot satisfy backend required phone. Mitigation: gate phone input on `canManage` for create mode, then retest admin create flow and daily payment detail path."
+}

@@ -114,7 +114,7 @@ export default function AdminPayments() {
             const s = PAY_STATUS[p.status];
             return (
               <Pressable key={p.id} onPress={() => { setSelected(p); setReason(""); }} style={styles.card} testID={`pay-${p.id}`}>
-                {token ? <Image source={imgSource(p.screenshot_path)} style={styles.thumb} resizeMode="cover" testID={`payment-proof-${p.id}`} /> : <ActivityIndicator style={styles.thumb} color={colors.brandPrimary} />}
+                {p.screenshot_path && token ? <Image source={imgSource(p.screenshot_path)} style={styles.thumb} resizeMode="cover" testID={`payment-proof-${p.id}`} /> : <View style={styles.cashProof} testID={`payment-cash-proof-${p.id}`}><Ionicons name="cash-outline" size={20} color={colors.success} /></View>}
                 <View style={{ flex: 1 }}>
                   <View style={styles.cardTop}>
                     <Text style={styles.amount}>₹{p.amount}</Text>
@@ -139,12 +139,14 @@ export default function AdminPayments() {
             <View style={styles.grabber} />
             <Text style={styles.modalTitle}>{selected?.user_name} · ₹{selected?.amount}</Text>
             <Text style={styles.sub}>+91 {selected?.user_phone} · {selected?.plan_name}{selected?.utr ? ` · UTR ${selected.utr}` : ""}</Text>
-            {selected && token && (
+            {selected?.screenshot_path && token ? (
               <Pressable onPress={() => setZoom(true)} testID="zoom-screenshot">
                 <Image source={imgSource(selected.screenshot_path)} style={styles.bigImg} resizeMode="contain" />
                 <Text style={styles.zoomHint}>Tap to enlarge</Text>
               </Pressable>
-            )}
+            ) : selected ? (
+              <View style={styles.noProof} testID="cash-entry-proof"><Ionicons name="cash-outline" size={28} color={colors.success} /><Text style={styles.noProofText}>Cash entry · screenshot not required</Text></View>
+            ) : null}
             {selected?.status === "pending" ? (
               isSuper ? (
                 <>
@@ -198,6 +200,7 @@ const useStyles = makeStyles((colors) => ({
   empty: { flex: 1, alignItems: "center", justifyContent: "center" },
   card: { flexDirection: "row", gap: 12, alignItems: "center", padding: 12, backgroundColor: colors.surfaceSecondary, borderRadius: 14, borderWidth: 1, borderColor: colors.border },
   thumb: { width: 56, height: 72, borderRadius: 8, backgroundColor: colors.surfaceTertiary },
+  cashProof: { width: 56, height: 72, borderRadius: 8, backgroundColor: "#D1FAE5", alignItems: "center", justifyContent: "center" },
   cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   amount: { fontSize: 16, fontWeight: "800", color: colors.brandPrimary },
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
@@ -210,6 +213,8 @@ const useStyles = makeStyles((colors) => ({
   grabber: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 12 },
   modalTitle: { fontSize: 18, fontWeight: "800", color: colors.onSurface },
   bigImg: { width: "100%", height: 260, borderRadius: 12, marginTop: 14, backgroundColor: colors.surfaceTertiary },
+  noProof: { height: 120, borderRadius: 12, marginTop: 14, backgroundColor: "#D1FAE5", alignItems: "center", justifyContent: "center", gap: 8 },
+  noProofText: { color: "#065F46", fontWeight: "700", fontSize: 13 },
   zoomHint: { textAlign: "center", fontSize: 11, color: colors.muted, marginTop: 4 },
   input: { marginTop: 12, height: 46, borderRadius: 12, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, color: colors.onSurface },
   btn: { flex: 1, height: 48, borderRadius: 12, flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center" },

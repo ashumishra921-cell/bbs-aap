@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@react-native-vector-icons/ionicons";
 import dayjs from "dayjs";
+import * as ImagePicker from "expo-image-picker";
 
 import { api, loadAuth, User } from "@/src/api";
 import { useToast } from "@/src/components/Toast";
@@ -60,10 +61,14 @@ export default function SubscribersList() {
   const [planOpen, setPlanOpen] = useState(false);
   const [planId, setPlanId] = useState("");
   const [payMode, setPayMode] = useState<Form["payment_mode"]>("cash");
+  const [paymentShot, setPaymentShot] = useState<{ uri: string; name: string; type: string } | null>(null);
+  const [paymentUtr, setPaymentUtr] = useState("");
+  const [paymentUploading, setPaymentUploading] = useState(false);
 
   const [confirmDel, setConfirmDel] = useState<any | null>(null);
 
   const isSuper = me?.role === "super_admin";
+  const canManage = me?.role === "admin" || isSuper;
 
   const load = useCallback(async () => {
     try {
@@ -129,17 +134,35 @@ export default function SubscribersList() {
     finally { setSaving(false); }
   };
 
-  const openAssign = (u: any) => { setPlanId(""); setPayMode("cash"); setPlanOpen(true); setDetail(u); };
+  const openAssign = (u: any) => {
+    setPlanId(""); setPayMode("cash"); setPaymentShot(null); setPaymentUtr(""); setPlanOpen(true); setDetail(u);
+  };
+
+  const pickPaymentScreenshot = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) { toast.show("Screenshot चुनने के लिए Photos permission दें", "error"); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.7, allowsEditing: false });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    setPaymentShot({ uri: asset.uri, name: asset.fileName || `payment-${Date.now()}.jpg`, type: asset.mimeType || "image/jpeg" });
+  };
   const assign = async () => {
     if (!detail || !planId) { toast.show("Plan चुनें", "error"); return; }
+    if (payMode === "upi" && !paymentShot) { toast.show("UPI screenshot upload करें", "error"); return; }
     setSaving(true);
     try {
-      await api.assignPlan(detail.id, planId, payMode);
-      toast.show("Plan activated ✓", "success");
+      let screenshot_path: string | undefined;
+      if (payMode === "upi" && paymentShot) {
+        setPaymentUploading(true);
+        const upload = await api.uploadScreenshot(paymentShot.uri, paymentShot.name, paymentShot.type);
+        screenshot_path = upload.path;
+      }
+      await api.createAdminPaymentEntry({ subscriber_id: detail.id, plan_id: planId, payment_mode: payMode as "cash" | "upi", screenshot_path, utr: paymentUtr.trim() || undefined });
+      toast.show("Daily payment entry saved · plan active ✓", "success");
       setPlanOpen(false); setDetail(null);
       load();
     } catch (e: any) { toast.show(e.message, "error"); }
-    finally { setSaving(false); }
+    finally { setSaving(false); setPaymentUploading(false); }
   };
 
   const doDelete = async (u: any) => {
@@ -210,7 +233,7 @@ export default function SubscribersList() {
         </ScrollView>
       )}
 
-      {isSuper && (
+      {canManage && (
         <Pressable onPress={openCreate} style={[styles.fab, { backgroundColor: colors.brandPrimary, bottom: insets.bottom + 24 }]} testID="add-subscriber-fab">
           <Ionicons name="person-add" size={24} color="#FFFFFF" />
         </Pressable>
@@ -231,12 +254,16 @@ export default function SubscribersList() {
               <DetailRow icon="calendar" label="Installed" value={detail?.installation_date} />
               <DetailRow icon="document-text" label="Notes" value={detail?.notes} />
             </View>
-            {isSuper && (
+            {canManage && (
               <>
                 <Pressable onPress={() => openAssign(detail)} style={[styles.primaryBtn, { backgroundColor: colors.brandPrimary }]} testID="assign-plan-btn">
-                  <Ionicons name="flash" size={18} color="#FFFFFF" />
-                  <Text style={styles.primaryTxt}>{detail?.active_plan ? "Renew / Change Plan" : "Assign Plan"}</Text>
+                  <Ionicons name="cash-outline" size={18} color="#FFFFFF" />
+                  <Text style={styles.primaryTxt}>Add Daily Payment</Text>
                 </Pressable>
+              </>
+            )}
+            {isSuper && (
+              <>
                 <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
                   <Pressable onPress={() => openEdit(detail)} style={[styles.secBtn, { borderColor: colors.brandPrimary }]} testID="edit-subscriber-btn">
                     <Ionicons name="create-outline" size={18} color={colors.brandPrimary} />
@@ -261,7 +288,7 @@ export default function SubscribersList() {
             <View style={styles.grabber} />
             <Text style={styles.modalTitle}>{editing ? "Edit Subscriber" : "Add Subscriber"}</Text>
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              {!editing && (
+              {!editing && canManage && (
                 <>
                   <Text style={styles.label}>Phone *</Text>
                   <TextInput testID="sub-phone" placeholder="10-digit" placeholderTextColor={colors.muted} value={form.phone} onChangeText={(t) => set("phone")(t.replace(/[^0-9]/g, ""))} keyboardType="number-pad" maxLength={10} style={styles.input} />
@@ -332,7 +359,7 @@ export default function SubscribersList() {
         <View style={styles.modalBg}>
           <View style={[styles.sheet, { paddingBottom: insets.bottom + 24 }]}>
             <View style={styles.grabber} />
-            <Text style={styles.modalTitle}>Assign Plan</Text>
+            <Text style={styles.modalTitle}>Add Daily Payment</Text>
             <Text style={styles.modalSub}>{detail?.name} · +91 {detail?.phone}</Text>
             <Text style={styles.label}>Select Plan</Text>
             <View style={{ gap: 8 }}>
@@ -349,14 +376,25 @@ export default function SubscribersList() {
             </View>
             <Text style={styles.label}>Payment Mode</Text>
             <View style={styles.chips}>
-              {PAY_MODES.map((m) => (
+              {(["cash", "upi"] as const).map((m) => (
                 <Pressable key={m} onPress={() => setPayMode(m)} style={[styles.chip, payMode === m && { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary }]} testID={`pay-${m}`}>
                   <Text style={[styles.chipTxt, payMode === m && { color: "#FFFFFF" }]}>{m.toUpperCase()}</Text>
                 </Pressable>
               ))}
             </View>
-            <Pressable onPress={assign} disabled={saving} style={[styles.primaryBtn, { backgroundColor: colors.brandPrimary, opacity: saving ? 0.8 : 1 }]} testID="confirm-assign-plan">
-              {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryTxt}>Activate Plan</Text>}
+            {payMode === "upi" && (
+              <>
+                <Text style={styles.label}>UPI Screenshot *</Text>
+                <Pressable onPress={pickPaymentScreenshot} style={[styles.uploadProof, { borderColor: paymentShot ? colors.success : colors.borderStrong }]} testID="admin-payment-screenshot">
+                  <Ionicons name={paymentShot ? "checkmark-circle" : "image-outline"} size={22} color={paymentShot ? colors.success : colors.brandPrimary} />
+                  <Text style={styles.uploadProofText}>{paymentShot ? "Screenshot selected ✓" : "Upload payment screenshot"}</Text>
+                </Pressable>
+                <Text style={styles.label}>UTR / Transaction ID (optional)</Text>
+                <TextInput testID="admin-payment-utr" placeholder="UTR number" placeholderTextColor={colors.muted} value={paymentUtr} onChangeText={setPaymentUtr} style={styles.input} />
+              </>
+            )}
+            <Pressable onPress={assign} disabled={saving || paymentUploading} style={[styles.primaryBtn, { backgroundColor: colors.brandPrimary, opacity: saving ? 0.8 : 1 }]} testID="confirm-assign-plan">
+              {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryTxt}>{payMode === "upi" ? "Save UPI & Activate" : "Save Cash & Activate"}</Text>}
             </Pressable>
             <Pressable onPress={() => setPlanOpen(false)} style={styles.cancel}><Text style={{ color: colors.muted, fontWeight: "600" }}>Cancel</Text></Pressable>
           </View>
@@ -424,6 +462,8 @@ const useStyles = makeStyles((colors) => ({
   chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary },
   chipTxt: { fontSize: 12, fontWeight: "700", color: colors.onSurface },
   planRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary },
+  uploadProof: { minHeight: 48, borderRadius: 12, borderWidth: 1, borderStyle: "dashed", backgroundColor: colors.surfaceTertiary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 12 },
+  uploadProofText: { color: colors.onSurface, fontWeight: "700", fontSize: 13 },
   primaryBtn: { marginTop: 16, height: 50, borderRadius: 14, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center" },
   primaryTxt: { color: "#FFFFFF", fontWeight: "700", fontSize: 16 },
   secBtn: { flex: 1, height: 46, borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceSecondary },

@@ -255,6 +255,10 @@ agent_communication:
     message: "User-confirmed Super Admin phone migration executed: existing target Admin had zero linked business records, so it was archived (not deleted); Super Admin immutable user id retained and phone moved to suffix 4211. Old suffix 9999 was added to retired_phones and its OTP challenges removed. Code now blocks retired phones and archived-user sessions. Self-check: old auth request 403; target role super_admin; archived account JWT 401."
   - agent: main
     message: "Pending balance feature added while push notification setup is deferred awaiting Firebase JSON. Subscriber Home now shows own expired-plan renewal due (or ₹0 clear state) via /api/me/pending-balance; Admin Collection Report labels existing customer-wise expired/non-renewed follow-up dues as Pending Balance. Self-check: subscriber endpoint 200 with amount/status and preview login renders."
+  - agent: main
+    message: "Admin daily payment flow added per user selection: Admin/Super Admin can create subscribers, then add Cash or UPI daily payment entries with immediate plan activation. Cash has no screenshot; UPI requires an uploaded actor-owned screenshot and optional UTR. Approved payment record/invoice/subscription are created together. Admin Payments now displays cash entries safely without an image. Preview smoke + lint/backend health pass; external WhatsBoost must be mocked during tests." 
+  - agent: testing
+    message: "Iteration 19 backend daily-payment tests passed 8/8, then Iteration 20 fixed and verified the critical Admin Add Subscriber phone-input UI gate. Admin/Super Admin creation and Daily Payment controls present; Team/Subscriber blocked; Super-only edit/delete preserved. WhatsBoost remained MOCKED/untouched." 
   - agent: testing
     message: "Iteration 17 Pending Balance regression passed 7/7 backend scenarios and frontend source/UI checks; external messaging remained MOCKED/untouched."
   - agent: testing

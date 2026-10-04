@@ -212,6 +212,14 @@ class CreateSubscriberBody(BaseModel):
     payment_mode: Literal["cash", "upi", "free"] = "cash"
 
 
+class AdminPaymentEntryBody(BaseModel):
+    subscriber_id: str
+    plan_id: str
+    payment_mode: Literal["cash", "upi"]
+    screenshot_path: Optional[str] = None
+    utr: Optional[str] = None
+
+
 class UpdateSubscriberBody(BaseModel):
     name: Optional[str] = None
     address: Optional[str] = None
@@ -896,7 +904,7 @@ class PaymentRequest(BaseModel):
     plan_id: str
     plan_name: str
     amount: float
-    screenshot_path: str
+    screenshot_path: Optional[str] = None
     utr: Optional[str] = None
     status: Literal["pending", "approved", "rejected"] = "pending"
     reject_reason: Optional[str] = None
@@ -986,6 +994,39 @@ async def create_payment(body: CreatePaymentBody, user: dict = Depends(get_curre
         f"Broadband Solutions 24x7: ₹{int(p.amount) if p.amount.is_integer() else p.amount} का भुगतान अनुरोध प्राप्त हुआ है। सत्यापन के बाद आपका प्लान सक्रिय किया जाएगा।",
     )
     return p.model_dump()
+
+
+async def validate_admin_screenshot(path: Optional[str], actor: dict, required: bool) -> None:
+    if not path and required:
+        raise HTTPException(status_code=400, detail="UPI payment के लिए screenshot upload करें")
+    if not path:
+        return
+    meta = await db.files.find_one({"path": path, "owner_id": actor["id"]}, {"_id": 0, "path": 1})
+    if not meta:
+        raise HTTPException(status_code=400, detail="Upload किया हुआ payment screenshot नहीं मिला")
+
+
+async def record_admin_payment(target: dict, plan: dict, body: AdminPaymentEntryBody, actor: dict) -> dict:
+    await validate_admin_screenshot(body.screenshot_path, actor, body.payment_mode == "upi")
+    activated = await activate_plan(target, plan, body.payment_mode, (body.utr or "").strip() or None)
+    payment = PaymentRequest(
+        user_id=target["id"], user_name=target["name"], user_phone=target["phone"],
+        plan_id=plan["id"], plan_name=plan["name"], amount=plan["price"],
+        screenshot_path=body.screenshot_path, utr=(body.utr or "").strip() or None,
+        status="approved", invoice_id=activated["invoice"]["id"],
+        reviewed_by=actor["name"], reviewed_at=datetime.now(timezone.utc),
+    )
+    await db.payments.insert_one(payment.model_dump())
+    return {"payment": payment.model_dump(), **activated}
+
+
+@api_router.post("/admin/payment-entries")
+async def create_admin_payment_entry(body: AdminPaymentEntryBody, user: dict = Depends(require_role("admin", "super_admin"))):
+    target = await db.users.find_one({"id": body.subscriber_id, "role": "subscriber"}, {"_id": 0})
+    plan = await db.plans.find_one({"id": body.plan_id, "active": True}, {"_id": 0})
+    if not target or not plan:
+        raise HTTPException(status_code=404, detail="Subscriber या active plan नहीं मिला")
+    return await record_admin_payment(target, plan, body, user)
 
 
 @api_router.get("/payments")
@@ -1255,7 +1296,7 @@ async def list_subscribers(user: dict = Depends(require_role("admin", "super_adm
 
 
 @api_router.post("/subscribers")
-async def create_subscriber(body: CreateSubscriberBody, user: dict = Depends(require_role("super_admin"))):
+async def create_subscriber(body: CreateSubscriberBody, user: dict = Depends(require_role("admin", "super_admin"))):
     phone = normalize_phone(body.phone)
     if not body.name.strip():
         raise HTTPException(status_code=400, detail="Name is required")
@@ -1263,16 +1304,23 @@ async def create_subscriber(body: CreateSubscriberBody, user: dict = Depends(req
         raise HTTPException(status_code=400, detail="Phone already exists")
     plan = None
     if body.plan_id:
-        plan = await db.plans.find_one({"id": body.plan_id}, {"_id": 0})
+        plan = await db.plans.find_one({"id": body.plan_id, "active": True}, {"_id": 0})
         if not plan:
             raise HTTPException(status_code=404, detail="Plan not found")
+        if body.payment_mode == "upi":
+            raise HTTPException(status_code=400, detail="UPI screenshot के लिए subscriber बनाने के बाद Daily Payment Entry का उपयोग करें")
     fields = body.model_dump(exclude={"phone", "name", "plan_id", "payment_mode"})
     new_user = User(phone=phone, name=body.name.strip(), role="subscriber", **fields)
     doc = new_user.model_dump()
     await db.users.insert_one(doc)
     result = clean(doc)
     if plan:
-        result["activated"] = await activate_plan(result, plan, body.payment_mode)
+        if body.payment_mode == "cash":
+            result["activated"] = await record_admin_payment(
+                result, plan, AdminPaymentEntryBody(subscriber_id=result["id"], plan_id=plan["id"], payment_mode="cash"), user,
+            )
+        else:
+            result["activated"] = await activate_plan(result, plan, body.payment_mode)
     return result
 
 

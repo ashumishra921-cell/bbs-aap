@@ -52,6 +52,7 @@ WHATSBOOST_APPKEY = os.environ.get('WHATSBOOST_APPKEY', '').strip()
 WHATSBOOST_AUTHKEY = os.environ.get('WHATSBOOST_AUTHKEY', '').strip()
 WHATSBOOST_NAME = os.environ.get('WHATSBOOST_NAME', 'Broadband Solutions 24x7').strip()
 WHATSBOOST_ENABLED = bool(WHATSBOOST_URL and WHATSBOOST_APPKEY and WHATSBOOST_AUTHKEY)
+OTP_PROVIDER_ENABLED = WHATSBOOST_ENABLED
 OTP_RESEND_COOLDOWN_SEC = 30
 OTP_TTL_MINUTES = 5
 OTP_MAX_ATTEMPTS = 5
@@ -79,7 +80,7 @@ class User(BaseModel):
     security_deposit: Optional[float] = None
     installation_date: Optional[str] = None
     notes: Optional[str] = None
-    whatsapp_updates: bool = False
+    whatsapp_updates: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -370,7 +371,7 @@ async def send_transactional_sms(phone: str, message: str) -> bool:
 
 async def send_whatsapp_notification(user: dict, event_key: str, message: str) -> bool:
     """Submit one opted-in transactional WhatsApp update; provider success is not delivery proof."""
-    if not WHATSBOOST_ENABLED or not user.get("whatsapp_updates", False):
+    if not WHATSBOOST_ENABLED or not user.get("whatsapp_updates", True):
         return False
     now = datetime.now(timezone.utc)
     record = {
@@ -414,6 +415,41 @@ async def send_whatsapp_notification(user: dict, event_key: str, message: str) -
         return False
 
 
+async def send_whatsboost_otp(phone: str, name: str) -> None:
+    """Create a local OTP challenge and send its code only through the configured WhatsBoost gateway."""
+    otp = str(secrets.randbelow(900000) + 100000)
+    now = datetime.now(timezone.utc)
+    await db.otp_challenges.update_one(
+        {"phone": phone},
+        {"$set": {
+            "phone": phone, "otp_hash": otp_digest(phone, otp), "attempts": 0,
+            "expires_at": now + timedelta(minutes=OTP_TTL_MINUTES), "created_at": now,
+        }},
+        upsert=True,
+    )
+    form = {
+        "appkey": WHATSBOOST_APPKEY,
+        "authkey": WHATSBOOST_AUTHKEY,
+        "to": f"91{phone}",
+        "name": name[:100],
+        "message": f"Broadband Solutions 24x7: आपका login OTP {otp} है। यह {OTP_TTL_MINUTES} मिनट तक मान्य है। इसे किसी के साथ साझा न करें।",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=8.0, read=20.0, write=10.0, pool=10.0), trust_env=False) as http:
+            response = await http.post(WHATSBOOST_URL, data=form)
+        if not 200 <= response.status_code < 300:
+            raise HTTPException(status_code=502, detail="WhatsApp OTP भेजने में समस्या हुई। कृपया बाद में प्रयास करें")
+    except httpx.TimeoutException:
+        await db.otp_challenges.delete_one({"phone": phone})
+        raise HTTPException(status_code=504, detail="WhatsApp OTP का जवाब देर से आया। कृपया दोबारा प्रयास करें")
+    except httpx.HTTPError:
+        await db.otp_challenges.delete_one({"phone": phone})
+        raise HTTPException(status_code=502, detail="WhatsApp OTP सेवा से कनेक्शन नहीं हो पाया")
+    except HTTPException:
+        await db.otp_challenges.delete_one({"phone": phone})
+        raise
+
+
 async def send_traccar_otp(phone: str) -> None:
     otp = str(secrets.randbelow(900000) + 100000)
     now = datetime.now(timezone.utc)
@@ -432,7 +468,7 @@ async def send_traccar_otp(phone: str) -> None:
         raise
 
 
-async def verify_traccar_otp(phone: str, otp: str) -> None:
+async def verify_local_otp(phone: str, otp: str) -> None:
     challenge = await db.otp_challenges.find_one({"phone": phone}, {"_id": 0})
     now = datetime.now(timezone.utc)
     if not challenge or challenge["expires_at"] <= now:
@@ -545,7 +581,7 @@ async def msg91_verify_otp(phone: str, otp: str) -> None:
 
 @api_router.get("/auth/config")
 async def auth_config():
-    return {"sms_enabled": SMS_ENABLED, "demo_otp": None, "resend_cooldown_sec": OTP_RESEND_COOLDOWN_SEC}
+    return {"sms_enabled": OTP_PROVIDER_ENABLED, "otp_channel": "whatsapp" if OTP_PROVIDER_ENABLED else None, "demo_otp": None, "resend_cooldown_sec": OTP_RESEND_COOLDOWN_SEC}
 
 
 @api_router.post("/auth/request-otp")
@@ -554,14 +590,14 @@ async def request_otp(body: RequestOtpBody, request: Request):
     user = await db.users.find_one({"phone": phone}, {"_id": 0})
     mock = uses_mock_otp(phone, user)
     await enforce_auth_limit("otp_send", phone, request, limit=5, window_minutes=15)
-    if not mock and not SMS_ENABLED:
-        raise HTTPException(status_code=503, detail="OTP सेवा अभी उपलब्ध नहीं है। कृपया बाद में प्रयास करें")
+    if not mock and not OTP_PROVIDER_ENABLED:
+        raise HTTPException(status_code=503, detail="WhatsApp OTP सेवा अभी उपलब्ध नहीं है। कृपया बाद में प्रयास करें")
     logger.info(
         "OTP request: phone_suffix=%s role=%s mode=%s provider=%s",
         phone[-4:],
         (user or {}).get("role", "new"),
-        "demo" if mock else "sms",
-        "traccar" if TRACCAR_SMS_ENABLED else ("msg91" if MSG91_SMS_ENABLED else "none"),
+        "demo" if mock else "whatsapp",
+        "whatsboost" if WHATSBOOST_ENABLED else "none",
     )
     now = datetime.now(timezone.utc)
     last = _otp_last_sent.get(phone)
@@ -569,15 +605,12 @@ async def request_otp(body: RequestOtpBody, request: Request):
         wait = OTP_RESEND_COOLDOWN_SEC - int((now - last).total_seconds())
         raise HTTPException(status_code=429, detail=f"कृपया {wait} सेकंड बाद पुनः प्रयास करें")
     if not mock:
-        if TRACCAR_SMS_ENABLED:
-            await send_traccar_otp(phone)
-        else:
-            await msg91_send_otp(phone)
+        await send_whatsboost_otp(phone, (user or {}).get("name") or WHATSBOOST_NAME)
     _otp_last_sent[phone] = now
     return {
         "success": True,
-        "mode": "demo" if mock else "sms",
-        "message": "OTP भेजा गया",
+        "mode": "demo" if mock else "whatsapp",
+        "message": "WhatsApp OTP भेजा गया",
         "otp": None,
         "is_new_user": user is None,
     }
@@ -589,15 +622,13 @@ async def verify_otp(body: VerifyOtpBody, request: Request):
     user = await db.users.find_one({"phone": phone}, {"_id": 0})
     mock = uses_mock_otp(phone, user)
     await enforce_auth_limit("otp_verify", phone, request, limit=8, window_minutes=15)
-    if not mock and not SMS_ENABLED:
-        raise HTTPException(status_code=503, detail="OTP सेवा अभी उपलब्ध नहीं है। कृपया बाद में प्रयास करें")
+    if not mock and not OTP_PROVIDER_ENABLED:
+        raise HTTPException(status_code=503, detail="WhatsApp OTP सेवा अभी उपलब्ध नहीं है। कृपया बाद में प्रयास करें")
     if mock:
         if body.otp != MOCK_OTP:
             raise HTTPException(status_code=400, detail="गलत OTP")
-    elif TRACCAR_SMS_ENABLED:
-        await verify_traccar_otp(phone, body.otp)
     else:
-        await msg91_verify_otp(phone, body.otp)
+        await verify_local_otp(phone, body.otp)
     await db.auth_throttles.delete_many({"bucket": {"$in": ["otp_verify:phone", "otp_verify:ip"]}, "key": {"$in": [phone, client_ip_key(request)]}})
     body.phone = phone
     if not user:
@@ -611,12 +642,12 @@ async def verify_otp(body: VerifyOtpBody, request: Request):
 
 @api_router.get("/auth/me")
 async def get_me(user: dict = Depends(get_current_user)):
-    return {**user, "whatsapp_updates": bool(user.get("whatsapp_updates", False))}
+    return {**user, "whatsapp_updates": bool(user.get("whatsapp_updates", True))}
 
 
 @api_router.get("/me/whatsapp-preference")
 async def get_whatsapp_preference(user: dict = Depends(require_role("subscriber"))):
-    return {"enabled": bool(user.get("whatsapp_updates", False))}
+    return {"enabled": bool(user.get("whatsapp_updates", True))}
 
 
 @api_router.patch("/me/whatsapp-preference")

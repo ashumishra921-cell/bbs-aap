@@ -62,9 +62,9 @@ async function request<T = any>(path: string, options: RequestInit = {}): Promis
 
 export const api = {
   authConfig: () =>
-    request<{ sms_enabled: boolean; demo_otp: string | null; resend_cooldown_sec: number }>("/auth/config"),
+    request<{ sms_enabled: boolean; otp_channel: "whatsapp" | null; demo_otp: string | null; resend_cooldown_sec: number }>("/auth/config"),
   requestOtp: (phone: string) =>
-    request<{ success: boolean; mode: "demo" | "sms"; is_new_user: boolean }>("/auth/request-otp", {
+    request<{ success: boolean; mode: "demo" | "whatsapp"; is_new_user: boolean }>("/auth/request-otp", {
       method: "POST",
       body: JSON.stringify({ phone }),
     }),

@@ -40,7 +40,7 @@ export default function OtpScreen() {
     setResending(true);
     try {
       await api.requestOtp(phone as string);
-      toast.show("OTP फिर से SMS किया गया", "success");
+      toast.show("OTP फिर से WhatsApp पर भेजा गया", "success");
       setCooldown(30);
     } catch (e: any) {
       toast.show(e.message || "Resend failed", "error");
@@ -90,7 +90,7 @@ export default function OtpScreen() {
       <View style={styles.body}>
         <Text style={styles.title}>OTP दर्ज करें</Text>
         <Text style={styles.sub} testID="otp-sub">
-          {`+91 ${phone} पर SMS OTP भेजा गया। कृपया 6-digit OTP दर्ज करें।`}
+          {`+91 ${phone} पर WhatsApp OTP भेजा गया। कृपया 6-digit OTP दर्ज करें।`}
         </Text>
 
         <TextInput

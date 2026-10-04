@@ -19,7 +19,7 @@ export default function ProfileScreen() {
   const [user, setUser] = useState<User | null>(null);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [whatsappUpdates, setWhatsappUpdates] = useState(false);
+  const [whatsappUpdates, setWhatsappUpdates] = useState(true);
   const [whatsappSaving, setWhatsappSaving] = useState(false);
 
   const load = useCallback(async () => {

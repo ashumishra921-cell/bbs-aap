@@ -126,7 +126,7 @@ export default function LoginScreen() {
             <Text style={styles.hintText} testID="otp-hint">
               {smsEnabled === false
                 ? "OTP सेवा अभी उपलब्ध नहीं है। कृपया सहायता केंद्र से संपर्क करें।"
-                : "आपके मोबाइल नंबर पर सुरक्षित 6-digit OTP SMS भेजा जाएगा।"}
+                : "आपके WhatsApp नंबर पर सुरक्षित 6-digit OTP भेजा जाएगा।"}
             </Text>
           </View>
         </View>

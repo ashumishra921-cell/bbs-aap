@@ -1,0 +1,57 @@
+{
+  "summary": "Iter 13 both-scope testing completed: backend WhatsBoost preference/OTP/notification regressions passed via API + mocked provider tests, and mobile web login behavior validated under intentional OTP provider-off mode.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Login hint text state",
+        "issue": "OTP hint can briefly show the generic 'secure OTP SMS' copy before auth config resolves to provider-off, causing transient misleading state.",
+        "testID": "otp-hint",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Authenticated subscriber profile toggle validation from mobile UI",
+        "issue": "Could not navigate to authenticated subscriber profile screen because public OTP is intentionally provider-off (503/429 fail-closed). API/source validation completed instead.",
+        "affected_testIDs": [
+          "whatsapp-updates-card",
+          "whatsapp-updates-switch"
+        ]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter13_whatsapp_preference_and_notifications.py",
+    "/app/test_reports/pytest/iter13_whatsapp_results.xml",
+    "/app/test_reports/artifacts_iter13_ui/mobile_login_loaded.jpeg",
+    "/app/test_reports/artifacts_iter13_ui/mobile_provider_off_login.jpeg"
+  ],
+  "action_items": [
+    "Optional UI polish: prevent initial optimistic OTP hint and render provider-off copy only after /api/auth/config resolves.",
+    "Align frontend backend URL key usage with platform policy by supporting EXPO_BACKEND_URL in src/api.ts (currently uses EXPO_PUBLIC_BACKEND_URL path)."
+  ],
+  "critical_code_review_comments": [
+    "WhatsBoost coverage is correctly guarded and tested: no secret leakage in tested API responses and no real provider call in idempotency/non-delivery tests (MOCKED).",
+    "backend/server.py remains very large (>700 lines); split auth/notifications/payments/complaints modules for safer future changes and targeted security reviews."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter13_whatsapp_preference_and_notifications.py",
+    "/app/test_reports/pytest/iter13_whatsapp_results.xml",
+    "/app/test_reports/iteration_13.json"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8)",
+    "frontend": "80% (mobile login + provider-off behavior verified; authenticated profile UI blocked by intentional OTP-off policy)"
+  },
+  "seed_data_creation": "No persistent seed data created. Temporary test user/data for mocked non-delivery test was cleaned up.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Use iter13 test file for regression of /me/whatsapp-preference authz/defaults, provider-off OTP contract (503 then 429), source-level toggle wiring, and WhatsBoost idempotency + non-rollback with provider calls MOCKED only.",
+  "rca_of_issue": "UI limitation is environmental by policy: secure auth is intentionally fail-closed without configured SMS provider, so subscriber-profile toggle cannot be reached through public OTP login. Backend/API behavior and source wiring were validated instead."
+}

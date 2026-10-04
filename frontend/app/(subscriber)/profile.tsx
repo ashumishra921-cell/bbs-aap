@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@react-native-vector-icons/ionicons";
 import dayjs from "dayjs";
@@ -19,13 +19,16 @@ export default function ProfileScreen() {
   const [user, setUser] = useState<User | null>(null);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [whatsappUpdates, setWhatsappUpdates] = useState(false);
+  const [whatsappSaving, setWhatsappSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const { user } = await loadAuth();
       setUser(user);
-      const inv = await api.invoices();
+      const [inv, preference] = await Promise.all([api.invoices(), api.whatsappPreference()]);
       setInvoices(inv);
+      setWhatsappUpdates(preference.enabled);
     } finally {
       setLoading(false);
     }
@@ -37,6 +40,19 @@ export default function ProfileScreen() {
     try { await api.logout(); } catch {}
     await clearAuth();
     router.replace("/");
+  };
+
+  const updateWhatsapp = async (enabled: boolean) => {
+    setWhatsappSaving(true);
+    try {
+      const result = await api.updateWhatsappPreference(enabled);
+      setWhatsappUpdates(result.enabled);
+      toast.show(result.enabled ? "WhatsApp updates चालू हैं" : "WhatsApp updates बंद हैं", "success");
+    } catch (e: any) {
+      toast.show(e.message || "WhatsApp preference update नहीं हुई", "error");
+    } finally {
+      setWhatsappSaving(false);
+    }
   };
 
   const [confirmDel, setConfirmDel] = useState(false);
@@ -110,6 +126,24 @@ export default function ProfileScreen() {
           </View>
         )}
 
+        <View style={styles.whatsappCard} testID="whatsapp-updates-card">
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={styles.whatsappTitle}>WhatsApp updates</Text>
+            <Text style={styles.whatsappSub}>Plan, payment, complaint और expiry की जानकारी WhatsApp पर पाएँ।</Text>
+          </View>
+          {whatsappSaving ? (
+            <ActivityIndicator color={colors.brandPrimary} testID="whatsapp-updates-saving" />
+          ) : (
+            <Switch
+              testID="whatsapp-updates-switch"
+              value={whatsappUpdates}
+              onValueChange={updateWhatsapp}
+              trackColor={{ true: colors.success, false: colors.borderStrong }}
+              thumbColor="#FFFFFF"
+            />
+          )}
+        </View>
+
         <HelplineCard />
 
         <Pressable onPress={logout} style={styles.logout} testID="logout-btn">
@@ -152,6 +186,9 @@ const useStyles = makeStyles((colors) => ({
   roleText: { fontSize: 11, color: "#FFFFFF", fontWeight: "800", letterSpacing: 0.5 },
   section: { fontSize: 16, fontWeight: "800", color: colors.onSurface, marginBottom: 12 },
   empty: { alignItems: "center", padding: 24 },
+  whatsappCard: { marginTop: 18, flexDirection: "row", alignItems: "center", padding: 16, borderRadius: 14, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border },
+  whatsappTitle: { color: colors.onSurface, fontSize: 15, fontWeight: "800" },
+  whatsappSub: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
   invRow: {
     backgroundColor: colors.surfaceSecondary, borderRadius: 12, padding: 14,
     borderWidth: 1, borderColor: colors.border,

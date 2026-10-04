@@ -14,6 +14,7 @@ Mobile ISP management app for Super Admin, Admin, Team Members and Subscribers. 
 - Foreground complaint and payment audio alerts with a visible switch, test controls and ~9-second repeat/automatic-stop playback.
 - Subscriber Home refreshes while focused so new plan activations become visible without manual navigation.
 - UPI files are stored in managed object storage and accessed using Authorization bearer headers only.
+- WhatsBoost transaction notifications are implemented for opted-in subscribers: plan activation, payment submission/confirmation, complaint updates and expiry reminders. Notifications are idempotent by business event and never roll back core business actions. WhatsBoost is never used for login OTP; fresh rotated backend-only keys are still required for live delivery.
 
 ## Security Status — Iteration 11
 - Production authentication is **real-provider-only**: public demo OTP, shared `123456`, role bypasses and seeded privileged demo accounts are disabled.
@@ -28,6 +29,7 @@ Mobile ISP management app for Super Admin, Admin, Team Members and Subscribers. 
 
 ## Backlog
 - **P0:** Configure MSG91 Auth Key, OTP Template/Flow ID and DLT Template ID; then test a real non-privileged customer OTP flow.
+- **P0:** Rotate WhatsBoost credentials, configure the new backend-only keys and run an opted-in real-recipient transaction notification test.
 - **P0:** Correct preview ingress/proxy CORS mutation without weakening app CORS.
 - **P1:** Optional collection reporting, extended technician/location validation and plan-editor verification.
 - **P2:** Closed-app push notifications for complaint assignments/status changes.

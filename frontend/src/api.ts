@@ -16,6 +16,7 @@ export type User = {
   phone: string;
   name: string;
   role: Role;
+  whatsapp_updates?: boolean;
   address?: string;
   location?: { lat: number; lng: number; updated_at?: string | null; sharing?: boolean };
 };
@@ -73,6 +74,8 @@ export const api = {
       body: JSON.stringify({ phone, otp, name }),
     }),
   me: () => request<User>("/auth/me"),
+  whatsappPreference: () => request<{ enabled: boolean }>("/me/whatsapp-preference"),
+  updateWhatsappPreference: (enabled: boolean) => request<{ enabled: boolean }>("/me/whatsapp-preference", { method: "PATCH", body: JSON.stringify({ enabled }) }),
   logout: () => request<{ success: boolean }>("/auth/logout", { method: "POST" }),
   deleteMyAccount: () => request("/auth/me", { method: "DELETE" }),
   badges: () => request<any>("/badges"),

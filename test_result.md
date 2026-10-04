@@ -237,3 +237,7 @@ agent_communication:
     message: "Iteration 11 security retest passed 10/10 backend and 2/2 frontend checks. App-side security remediation is verified; public preview CORS mutation is upstream infrastructure, while local FastAPI strict CORS works correctly."
   - agent: testing
     message: "Iteration 12 provider-off regression passed 8/8 backend checks. Verify/request OTP both fail closed (503) and rate-limit (429) without making MSG91/Traccar calls; demo leakage, JWT revocation, query-token denial and invoice role boundaries remain protected."
+  - agent: main
+    message: "WhatsBoost transaction-notification integration added with server-only credentials, opt-in subscriber preference, idempotent event records and non-blocking status handling. It is intentionally excluded from login OTP/authentication. Self-check: configured sender loads, preference GET/PATCH works and was reset to opt-out; no WhatsApp message was triggered during this check."
+  - agent: testing
+    message: "Iteration 13 WhatsBoost feature verification passed 8/8 backend tests. Subscriber consent is default opt-out and subscriber-only; opted-out flow creates no provider message record; provider is MOCKED in tests; idempotency and non-blocking business behavior passed. No live message sent. Exposed keys were removed pending rotation."

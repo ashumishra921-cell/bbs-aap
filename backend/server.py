@@ -19,6 +19,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 from datetime import datetime, timezone, timedelta
+from pymongo.errors import DuplicateKeyError
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -46,6 +47,11 @@ TRACCAR_SMS_SIM_SLOT = int(TRACCAR_SMS_SIM_SLOT_RAW) if TRACCAR_SMS_SIM_SLOT_RAW
 TRACCAR_SMS_ENABLED = bool(TRACCAR_SMS_URL and TRACCAR_SMS_API_KEY)
 MSG91_SMS_ENABLED = bool(MSG91_AUTH_KEY and MSG91_TEMPLATE_ID)
 SMS_ENABLED = TRACCAR_SMS_ENABLED or MSG91_SMS_ENABLED
+WHATSBOOST_URL = os.environ.get('WHATSBOOST_URL', 'https://whatsboost.in/api/create-message').strip()
+WHATSBOOST_APPKEY = os.environ.get('WHATSBOOST_APPKEY', '').strip()
+WHATSBOOST_AUTHKEY = os.environ.get('WHATSBOOST_AUTHKEY', '').strip()
+WHATSBOOST_NAME = os.environ.get('WHATSBOOST_NAME', 'Broadband Solutions 24x7').strip()
+WHATSBOOST_ENABLED = bool(WHATSBOOST_URL and WHATSBOOST_APPKEY and WHATSBOOST_AUTHKEY)
 OTP_RESEND_COOLDOWN_SEC = 30
 OTP_TTL_MINUTES = 5
 OTP_MAX_ATTEMPTS = 5
@@ -73,6 +79,7 @@ class User(BaseModel):
     security_deposit: Optional[float] = None
     installation_date: Optional[str] = None
     notes: Optional[str] = None
+    whatsapp_updates: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -149,6 +156,10 @@ class VerifyOtpBody(BaseModel):
     phone: str
     otp: str
     name: Optional[str] = None  # for new subscribers
+
+
+class WhatsAppPreferenceBody(BaseModel):
+    enabled: bool
 
 
 class CreateComplaintBody(BaseModel):
@@ -357,6 +368,52 @@ async def send_transactional_sms(phone: str, message: str) -> bool:
         return False
 
 
+async def send_whatsapp_notification(user: dict, event_key: str, message: str) -> bool:
+    """Submit one opted-in transactional WhatsApp update; provider success is not delivery proof."""
+    if not WHATSBOOST_ENABLED or not user.get("whatsapp_updates", False):
+        return False
+    now = datetime.now(timezone.utc)
+    record = {
+        "event_key": event_key,
+        "user_id": user["id"],
+        "phone_suffix": user["phone"][-4:],
+        "category": event_key.split(":", 1)[0],
+        "status": "sending",
+        "created_at": now,
+    }
+    try:
+        await db.whatsapp_notifications.insert_one(record)
+    except DuplicateKeyError:
+        return False
+
+    form = {
+        "appkey": WHATSBOOST_APPKEY,
+        "authkey": WHATSBOOST_AUTHKEY,
+        "to": f"91{user['phone']}",
+        "name": user["name"][:100],
+        "message": message[:3000],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=8.0, read=15.0, write=10.0, pool=10.0), trust_env=False) as http:
+            response = await http.post(WHATSBOOST_URL, data=form)
+        status = "submitted" if 200 <= response.status_code < 300 else "failed"
+        await db.whatsapp_notifications.update_one(
+            {"event_key": event_key},
+            {"$set": {"status": status, "provider_http": response.status_code, "updated_at": datetime.now(timezone.utc)}},
+        )
+        if status == "failed":
+            logger.warning("WhatsApp notification rejected: event=%s status=%s", record["category"], response.status_code)
+        return status == "submitted"
+    except httpx.TimeoutException:
+        await db.whatsapp_notifications.update_one({"event_key": event_key}, {"$set": {"status": "unknown", "updated_at": datetime.now(timezone.utc)}})
+        logger.warning("WhatsApp notification timeout: event=%s", record["category"])
+        return False
+    except httpx.HTTPError as exc:
+        await db.whatsapp_notifications.update_one({"event_key": event_key}, {"$set": {"status": "unknown", "updated_at": datetime.now(timezone.utc)}})
+        logger.warning("WhatsApp notification connection failure: %s", type(exc).__name__)
+        return False
+
+
 async def send_traccar_otp(phone: str) -> None:
     otp = str(secrets.randbelow(900000) + 100000)
     now = datetime.now(timezone.utc)
@@ -398,6 +455,11 @@ async def notify_plan_activation(user: dict, plan: dict, invoice: Invoice, expir
         user["phone"],
         f"Broadband Solutions 24x7: आपका {plan['name']} प्लान सक्रिय हो गया है। वैधता {expiry} तक है। भुगतान ₹{amount} ({invoice.payment_mode.upper()}) प्राप्त हुआ। सहायता: 8826004211",
     )
+    await send_whatsapp_notification(
+        user,
+        f"plan_activation:{invoice.id}",
+        f"Broadband Solutions 24x7: आपका {plan['name']} प्लान सक्रिय हो गया है। वैधता {expiry} तक है। भुगतान ₹{amount} प्राप्त हुआ। सहायता: 8826004211",
+    )
 
 
 async def notify_complaint_created(complaint: dict) -> None:
@@ -405,6 +467,13 @@ async def notify_complaint_created(complaint: dict) -> None:
         complaint["user_phone"],
         f"Broadband Solutions 24x7: आपकी शिकायत {complaint['ticket_no']} दर्ज हो गई है। हम जल्द संपर्क करेंगे।",
     )
+    subscriber = await db.users.find_one({"id": complaint["user_id"]}, {"_id": 0})
+    if subscriber:
+        await send_whatsapp_notification(
+            subscriber,
+            f"complaint_created:{complaint['id']}",
+            f"Broadband Solutions 24x7: आपकी शिकायत {complaint['ticket_no']} दर्ज हो गई है। हम जल्द संपर्क करेंगे।",
+        )
     if complaint.get("assigned_to"):
         technician = await db.users.find_one({"id": complaint["assigned_to"]}, {"_id": 0, "phone": 1})
         if technician:
@@ -420,6 +489,13 @@ async def notify_complaint_update(complaint: dict) -> None:
         complaint["user_phone"],
         f"Broadband Solutions 24x7: शिकायत {complaint['ticket_no']} की स्थिति: {label}।",
     )
+    subscriber = await db.users.find_one({"id": complaint["user_id"]}, {"_id": 0})
+    if subscriber:
+        await send_whatsapp_notification(
+            subscriber,
+            f"complaint_update:{complaint['id']}:{complaint['status']}:{complaint['updated_at'].isoformat()}",
+            f"Broadband Solutions 24x7: शिकायत {complaint['ticket_no']} की स्थिति: {label}।",
+        )
     if complaint.get("assigned_to"):
         technician = await db.users.find_one({"id": complaint["assigned_to"]}, {"_id": 0, "phone": 1})
         if technician:
@@ -535,7 +611,18 @@ async def verify_otp(body: VerifyOtpBody, request: Request):
 
 @api_router.get("/auth/me")
 async def get_me(user: dict = Depends(get_current_user)):
-    return user
+    return {**user, "whatsapp_updates": bool(user.get("whatsapp_updates", False))}
+
+
+@api_router.get("/me/whatsapp-preference")
+async def get_whatsapp_preference(user: dict = Depends(require_role("subscriber"))):
+    return {"enabled": bool(user.get("whatsapp_updates", False))}
+
+
+@api_router.patch("/me/whatsapp-preference")
+async def update_whatsapp_preference(body: WhatsAppPreferenceBody, user: dict = Depends(require_role("subscriber"))):
+    await db.users.update_one({"id": user["id"]}, {"$set": {"whatsapp_updates": body.enabled, "whatsapp_updates_updated_at": datetime.now(timezone.utc)}})
+    return {"enabled": body.enabled}
 
 
 @api_router.post("/auth/logout")
@@ -783,6 +870,11 @@ async def create_payment(body: CreatePaymentBody, user: dict = Depends(get_curre
     await db.payments.insert_one(p.model_dump())
     await send_transactional_sms(
         user["phone"],
+        f"Broadband Solutions 24x7: ₹{int(p.amount) if p.amount.is_integer() else p.amount} का भुगतान अनुरोध प्राप्त हुआ है। सत्यापन के बाद आपका प्लान सक्रिय किया जाएगा।",
+    )
+    await send_whatsapp_notification(
+        user,
+        f"payment_received:{p.id}",
         f"Broadband Solutions 24x7: ₹{int(p.amount) if p.amount.is_integer() else p.amount} का भुगतान अनुरोध प्राप्त हुआ है। सत्यापन के बाद आपका प्लान सक्रिय किया जाएगा।",
     )
     return p.model_dump()
@@ -1289,7 +1381,7 @@ async def run_expiry_reminders() -> dict:
     }, {"_id": 0}).to_list(500)
     sent = skipped = failed = 0
     for s in subs:
-        u = await db.users.find_one({"id": s["user_id"]}, {"_id": 0, "name": 1, "phone": 1})
+        u = await db.users.find_one({"id": s["user_id"]}, {"_id": 0, "id": 1, "name": 1, "phone": 1, "whatsapp_updates": 1})
         if not u:
             continue
         days = max(0, (s["expires_at"] - now).days)
@@ -1297,14 +1389,27 @@ async def run_expiry_reminders() -> dict:
             "id": str(uuid.uuid4()), "subscription_id": s["id"], "user_id": s["user_id"], "name": u["name"], "phone": u["phone"],
             "plan_name": s["plan_name"], "expires_at": s["expires_at"], "days_left": days, "created_at": now, "channel": "sms",
         }
+        expiry_date = s["expires_at"].astimezone(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %Y")
+        whatsapp_sent = await send_whatsapp_notification(
+            u,
+            f"expiry_reminder:{s['id']}",
+            f"Broadband Solutions 24x7: नमस्ते {u['name']}, आपका {s['plan_name']} प्लान {expiry_date} को समाप्त हो रहा है ({days} दिन बाकी)। समय पर रिचार्ज करें। सहायता: 8826004211",
+        )
         if not EXPIRY_SMS_ENABLED or u["phone"] in DEMO_NUMBERS:
-            log["status"] = "skipped"
-            log["detail"] = "SMS gateway not configured" if not EXPIRY_SMS_ENABLED else "demo number"
-            skipped += 1
+            if whatsapp_sent:
+                log["status"] = "sent"
+                log["channel"] = "whatsapp"
+                sent += 1
+            else:
+                log["status"] = "skipped"
+                log["detail"] = "No opted-in WhatsApp recipient or SMS gateway configured" if not EXPIRY_SMS_ENABLED else "demo number"
+                skipped += 1
         else:
             try:
-                await send_expiry_sms(u["phone"], u["name"], s["plan_name"], days, s["expires_at"].astimezone(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %Y"))
+                await send_expiry_sms(u["phone"], u["name"], s["plan_name"], days, expiry_date)
                 log["status"] = "sent"
+                if whatsapp_sent:
+                    log["channel"] = "sms+whatsapp"
                 sent += 1
             except Exception as e:
                 logger.error(f"Expiry SMS failed for {u['phone']}: {e}")
@@ -1418,6 +1523,7 @@ async def startup():
     await db.auth_throttles.create_index("expires_at", expireAfterSeconds=0)
     await db.revoked_tokens.create_index("expires_at", expireAfterSeconds=0)
     await db.revoked_tokens.create_index("jti", unique=True)
+    await db.whatsapp_notifications.create_index("event_key", unique=True)
     await seed()
     asyncio.create_task(reminder_loop())
     try:

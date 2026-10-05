@@ -63,6 +63,8 @@ export default function AdminComplaints() {
   const filtered = items.filter((c) =>
     filter === "all" ? true : filter === "open" ? c.status !== "resolved" : c.status === "resolved"
   );
+  const activeCount = items.filter((c) => c.status !== "resolved").length;
+  const resolvedCount = items.filter((c) => c.status === "resolved").length;
 
   const assign = async (memberId: string) => {
     if (!selected) return;
@@ -90,6 +92,11 @@ export default function AdminComplaints() {
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.title}>All Complaints</Text>
+        <View style={styles.countRow} testID="complaint-status-summary">
+          <Text style={styles.countText}>Total {items.length}</Text>
+          <Text style={styles.countText}>Active {activeCount}</Text>
+          <Text style={styles.countText}>Resolved {resolvedCount}</Text>
+        </View>
         <View style={styles.autoRow} testID="auto-assign-row">
           <Ionicons name="flash" size={16} color={colors.brandPrimary} />
           <View style={{ flex: 1 }}>
@@ -112,7 +119,7 @@ export default function AdminComplaints() {
               onPress={() => setFilter(f)}
               style={[styles.chip, filter === f && { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary }]}
             >
-              <Text style={[styles.chipTxt, filter === f && { color: "#FFFFFF" }]}>{f.toUpperCase()}</Text>
+              <Text style={[styles.chipTxt, filter === f && { color: "#FFFFFF" }]}>{f === "all" ? `ALL (${items.length})` : f === "open" ? `ACTIVE (${activeCount})` : `RESOLVED (${resolvedCount})`}</Text>
             </Pressable>
           ))}
         </ScrollView>
@@ -221,6 +228,8 @@ export default function AdminComplaints() {
 const useStyles = makeStyles((colors) => ({
   header: { paddingHorizontal: 20, paddingBottom: 12, backgroundColor: colors.surfaceSecondary, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 12 },
   title: { fontSize: 22, fontWeight: "800", color: colors.onSurface },
+  countRow: { flexDirection: "row", gap: 8 },
+  countText: { color: colors.muted, fontSize: 11, fontWeight: "700", backgroundColor: colors.surfaceTertiary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
   autoRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, borderRadius: 12, backgroundColor: colors.brandTertiary },
   autoTitle: { fontSize: 13, fontWeight: "700", color: colors.onBrandTertiary },
   autoSub: { fontSize: 11, color: colors.onBrandTertiary, marginTop: 1 },

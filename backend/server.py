@@ -1686,6 +1686,7 @@ from payment_activity import register_payment_activity
 register_payment_activity(api_router, db, get_current_user)
 app.include_router(api_router)
 ALLOWED_ORIGINS = [origin.strip() for origin in os.environ.get("CORS_ORIGINS", "").split(",") if origin.strip()]
+CORS_ORIGIN_REGEX = os.environ.get("CORS_ORIGIN_REGEX", "").strip() or None
 
 
 @app.middleware("http")
@@ -1704,6 +1705,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_credentials=False,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )

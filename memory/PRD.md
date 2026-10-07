@@ -3,6 +3,9 @@
 ## Product
 Mobile ISP management app for Super Admin, Admin, Team Members and Subscribers. Core flows: phone/OTP login, plans and subscriptions, UPI screenshot payments/invoices, complaints and assignment, Hindi AI support chat, payment history, expiry awareness, live refresh and dashboard alerts.
 
+## Current Problem Statement
+Customer creation must reliably capture ISP User ID, ISP provider and optional manual expiry; subscribers must clearly see and upgrade their active plan; AI Support must expose the 8826004211 call action; Super Admin must be able to add customers in bulk.
+
 ## Architecture
 - **Mobile:** Expo Router / React Native, TypeScript, Expo Audio, AsyncStorage, Expo Image.
 - **Backend:** FastAPI, Motor/MongoDB, JWT auth, Emergent Object Storage for payment images.
@@ -10,6 +13,10 @@ Mobile ISP management app for Super Admin, Admin, Team Members and Subscribers. 
 
 ## Implemented
 - Role-scoped dashboards, subscriptions, plan management, customer/team management, UPI screenshot review, invoices, reports and payment history.
+- Customer creation now supports unique ISP User ID, Anonet/Zepbyt/GTPL or custom provider, optional plan activation, manual expiry and clear inline validation. Legacy plans without an explicit `active` field remain assignable unless disabled.
+- Super Admin bulk customer import accepts up to 200 pasted CSV-style rows with mobile preview, validation summary and per-row backend results; other roles are denied.
+- Subscriber Home displays an explicit ACTIVE plan card and Upgrade / Change Plan action leading to the recharge plan list.
+- AI Support displays human support number 8826004211 with a one-tap phone dial action.
 - Admin/Super Admin daily collection entry: both can add subscribers, record Cash or UPI payment, and activate a plan immediately. UPI requires an actor-owned screenshot (UTR optional); Cash uses a no-screenshot payment record and is shown safely in Payments.
 - Pending Balance: Subscriber Home shows ₹0 clear state or the latest expired-plan renewal amount with a Recharge action; Admin Collection Report provides the customer-wise Pending Balance follow-up list.
 - Complaint creation, automatic/administrative assignment, team work states, location sharing and status updates.
@@ -35,4 +42,4 @@ Mobile ISP management app for Super Admin, Admin, Team Members and Subscribers. 
 - **P0:** Rotate the WhatsBoost credentials shared in chat, update backend-only `WHATSBOOST_APPKEY`/`WHATSBOOST_AUTHKEY`, then run one manual OTP and opted-in transaction-message check with an explicitly consented recipient. Provider HTTP acceptance is not a delivery receipt.
 - **P0:** Correct preview ingress/proxy CORS mutation without weakening app CORS.
 - **P1:** Optional collection reporting, extended technician/location validation and plan-editor verification.
-- **P1:** Closed-app notification sounds await Firebase `google-services.json`; planned routing is Admin/Super Admin (payment + complaint), Team (assigned complaint), and Subscriber (own relevant updates).
+- **P2:** Closed-app notification sounds await Firebase `google-services.json`; planned routing is Admin/Super Admin (payment + complaint), Team (assigned complaint), and Subscriber (own relevant updates).

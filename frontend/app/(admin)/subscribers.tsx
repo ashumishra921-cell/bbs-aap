@@ -30,16 +30,35 @@ type Form = {
   security_deposit: string;
   installation_date: string;
   notes: string;
+  isp_user_id: string;
+  isp_provider: string;
+  expiry_date: string;
   plan_id: string;
   payment_mode: "cash" | "upi" | "free";
 };
 
 const EMPTY: Form = {
   phone: "", name: "", address: "", router_model: "", router_mac: "",
-  security_deposit: "", installation_date: "", notes: "", plan_id: "", payment_mode: "cash",
+  security_deposit: "", installation_date: "", notes: "", isp_user_id: "", isp_provider: "", expiry_date: "", plan_id: "", payment_mode: "cash",
 };
 
-const PAY_MODES: Form["payment_mode"][] = ["cash", "upi", "free"];
+const CREATE_PAY_MODES: Form["payment_mode"][] = ["cash", "free"];
+
+function parseBulkUsers(value: string) {
+  const rows = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const dataRows = rows[0]?.toLowerCase().includes("phone") ? rows.slice(1) : rows;
+  const users: { phone: string; name: string; isp_user_id: string; isp_provider: string; address?: string }[] = [];
+  const errors: string[] = [];
+  dataRows.forEach((line, index) => {
+    const [name = "", phone = "", isp_user_id = "", isp_provider = "", ...address] = line.split(",").map((v) => v.trim());
+    if (!name || !/^\d{10}$/.test(phone) || !isp_user_id || !isp_provider) {
+      errors.push(`Row ${index + 1}: Name, 10-digit phone, ISP ID और provider आवश्यक हैं`);
+      return;
+    }
+    users.push({ name, phone, isp_user_id, isp_provider, address: address.join(", ") || undefined });
+  });
+  return { users, errors, total: dataRows.length };
+}
 
 export default function SubscribersList() {
   const styles = useStyles();
@@ -48,6 +67,7 @@ export default function SubscribersList() {
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
+  const [ispProviders, setIspProviders] = useState<any[]>([]);
   const [me, setMe] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -56,6 +76,11 @@ export default function SubscribersList() {
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState<Form>(EMPTY);
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ created_count: number; error_count: number; errors: { row: number; message: string }[] } | null>(null);
 
   const [detail, setDetail] = useState<any | null>(null);
   const [planOpen, setPlanOpen] = useState(false);
@@ -64,6 +89,8 @@ export default function SubscribersList() {
   const [paymentShot, setPaymentShot] = useState<{ uri: string; name: string; type: string } | null>(null);
   const [paymentUtr, setPaymentUtr] = useState("");
   const [paymentUploading, setPaymentUploading] = useState(false);
+  const [paymentExpiryDate, setPaymentExpiryDate] = useState("");
+  const [newIsp, setNewIsp] = useState("");
 
   const [confirmDel, setConfirmDel] = useState<any | null>(null);
 
@@ -74,9 +101,10 @@ export default function SubscribersList() {
     try {
       const { user } = await loadAuth();
       setMe(user);
-      const [s, p] = await Promise.all([api.subscribers(), api.plans()]);
+      const [s, p, providers] = await Promise.all([api.subscribers(), api.plans(), api.ispProviders()]);
       setItems(s);
       setPlans(p);
+      setIspProviders(providers);
     } finally {
       setLoading(false);
     }
@@ -88,28 +116,32 @@ export default function SubscribersList() {
     const q = query.trim().toLowerCase();
     if (!q) return items;
     return items.filter((u) =>
-      (u.name || "").toLowerCase().includes(q) || (u.phone || "").includes(q) || (u.address || "").toLowerCase().includes(q),
+      (u.name || "").toLowerCase().includes(q) || (u.phone || "").includes(q) || (u.isp_user_id || "").toLowerCase().includes(q) || (u.isp_provider || "").toLowerCase().includes(q) || (u.address || "").toLowerCase().includes(q),
     );
   }, [items, query]);
+  const bulkPreview = useMemo(() => parseBulkUsers(bulkText), [bulkText]);
 
   const set = (k: keyof Form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY); setFormOpen(true); };
+  const openCreate = () => { setEditing(null); setNewIsp(""); setFormError(""); setForm(EMPTY); setFormOpen(true); };
   const openEdit = (u: any) => {
     setEditing(u);
+    setFormError("");
     setForm({
       ...EMPTY,
       phone: u.phone, name: u.name || "", address: u.address || "", router_model: u.router_model || "",
       router_mac: u.router_mac || "", security_deposit: u.security_deposit != null ? String(u.security_deposit) : "",
-      installation_date: u.installation_date || "", notes: u.notes || "",
+      installation_date: u.installation_date || "", notes: u.notes || "", isp_user_id: u.isp_user_id || "", isp_provider: u.isp_provider || "",
     });
     setDetail(null);
     setFormOpen(true);
   };
 
   const save = async () => {
-    if (!editing && form.phone.length < 10) { toast.show("10 अंकों का phone भरें", "error"); return; }
-    if (!form.name.trim()) { toast.show("नाम आवश्यक है", "error"); return; }
+    setFormError("");
+    if (!editing && form.phone.length < 10) { setFormError("10 अंकों का phone भरें"); return; }
+    if (!form.name.trim()) { setFormError("नाम आवश्यक है"); return; }
+    if (!form.isp_user_id.trim() || !form.isp_provider.trim()) { setFormError("ISP User ID और ISP Provider आवश्यक हैं"); return; }
     setSaving(true);
     const payload: Record<string, any> = {
       name: form.name.trim(),
@@ -119,23 +151,58 @@ export default function SubscribersList() {
       security_deposit: form.security_deposit ? Number(form.security_deposit) : undefined,
       installation_date: form.installation_date.trim() || undefined,
       notes: form.notes.trim() || undefined,
+      isp_user_id: form.isp_user_id.trim(),
+      isp_provider: form.isp_provider.trim(),
     };
     try {
       if (editing) {
         await api.updateSubscriber(editing.id, payload);
         toast.show("Subscriber updated ✓", "success");
       } else {
-        await api.createSubscriber({ ...payload, phone: form.phone, plan_id: form.plan_id || undefined, payment_mode: form.payment_mode });
+        await api.createSubscriber({ ...payload, phone: form.phone, plan_id: form.plan_id || undefined, payment_mode: form.payment_mode, expiry_date: form.expiry_date || undefined });
         toast.show(form.plan_id ? "Subscriber added & plan activated ✓" : "Subscriber added ✓", "success");
       }
       setFormOpen(false);
       load();
-    } catch (e: any) { toast.show(e.message, "error"); }
+    } catch (e: any) { setFormError(e.message || "Customer add नहीं हुआ"); toast.show(e.message, "error"); }
     finally { setSaving(false); }
   };
 
+  const openBulk = () => {
+    setBulkText("");
+    setBulkResult(null);
+    setBulkOpen(true);
+  };
+
+  const importBulk = async () => {
+    if (!bulkPreview.users.length) { toast.show("कम से कम एक सही customer row डालें", "error"); return; }
+    if (bulkPreview.errors.length) { toast.show("पहले invalid rows ठीक करें", "error"); return; }
+    setBulkSaving(true);
+    try {
+      const result = await api.createSubscribersBulk(bulkPreview.users);
+      setBulkResult(result);
+      if (result.created_count) await load();
+      toast.show(`${result.created_count} customer add हुए${result.error_count ? ` · ${result.error_count} failed` : " ✓"}`, result.error_count ? "info" : "success");
+    } catch (e: any) {
+      toast.show(e.message || "Bulk import failed", "error");
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
   const openAssign = (u: any) => {
-    setPlanId(""); setPayMode("cash"); setPaymentShot(null); setPaymentUtr(""); setPlanOpen(true); setDetail(u);
+    setPlanId(""); setPayMode("cash"); setPaymentShot(null); setPaymentUtr(""); setPaymentExpiryDate(""); setPlanOpen(true); setDetail(u);
+  };
+
+  const addIspProvider = async () => {
+    if (!newIsp.trim()) { toast.show("ISP provider नाम लिखें", "error"); return; }
+    try {
+      const provider = await api.createIspProvider(newIsp.trim());
+      setIspProviders((list) => list.some((p) => p.id === provider.id) ? list : [...list, provider].sort((a, b) => a.name.localeCompare(b.name)));
+      setForm((f) => ({ ...f, isp_provider: provider.name }));
+      setNewIsp("");
+      toast.show(`${provider.name} ISP added ✓`, "success");
+    } catch (e: any) { toast.show(e.message || "ISP add नहीं हुआ", "error"); }
   };
 
   const pickPaymentScreenshot = async () => {
@@ -157,7 +224,7 @@ export default function SubscribersList() {
         const upload = await api.uploadScreenshot(paymentShot.uri, paymentShot.name, paymentShot.type);
         screenshot_path = upload.path;
       }
-      await api.createAdminPaymentEntry({ subscriber_id: detail.id, plan_id: planId, payment_mode: payMode as "cash" | "upi", screenshot_path, utr: paymentUtr.trim() || undefined });
+      await api.createAdminPaymentEntry({ subscriber_id: detail.id, plan_id: planId, payment_mode: payMode as "cash" | "upi", screenshot_path, utr: paymentUtr.trim() || undefined, expiry_date: paymentExpiryDate.trim() || undefined });
       toast.show("Daily payment entry saved · plan active ✓", "success");
       setPlanOpen(false); setDetail(null);
       load();
@@ -180,8 +247,16 @@ export default function SubscribersList() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <Text style={styles.title}>Subscribers ({items.length})</Text>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}> 
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>Subscribers ({items.length})</Text>
+          {isSuper && (
+            <Pressable onPress={openBulk} style={styles.bulkHeaderBtn} testID="open-bulk-user-import-btn">
+              <Ionicons name="people-circle-outline" size={18} color={colors.brandPrimary} />
+              <Text style={styles.bulkHeaderText}>Bulk Add</Text>
+            </Pressable>
+          )}
+        </View>
         <View style={styles.searchBox}>
           <Ionicons name="search" size={18} color={colors.muted} />
           <TextInput
@@ -248,6 +323,8 @@ export default function SubscribersList() {
             <Text style={styles.modalSub}>+91 {detail?.phone}</Text>
             <View style={styles.detailGrid}>
               <DetailRow icon="wifi" label="Plan" value={detail?.active_plan ? `${detail.active_plan} · till ${dayjs(detail.expires_at).format("DD MMM YYYY")}` : "No active plan"} />
+              <DetailRow icon="id-card" label="ISP User ID" value={detail?.isp_user_id} />
+              <DetailRow icon="business" label="ISP Portal" value={detail?.isp_provider} />
               <DetailRow icon="location" label="Address" value={detail?.address} />
               <DetailRow icon="hardware-chip" label="Router" value={[detail?.router_model, detail?.router_mac].filter(Boolean).join(" · ")} />
               <DetailRow icon="cash" label="Security Deposit" value={detail?.security_deposit != null ? `₹${detail.security_deposit}` : undefined} />
@@ -286,7 +363,13 @@ export default function SubscribersList() {
         <KeyboardAvoidingView style={styles.modalBg} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <View style={[styles.sheet, { paddingBottom: insets.bottom + 16, maxHeight: "92%" }]}>
             <View style={styles.grabber} />
-            <Text style={styles.modalTitle}>{editing ? "Edit Subscriber" : "Add Subscriber"}</Text>
+            <Text style={styles.modalTitle} testID="customer-add-form-title">{editing ? "Edit Subscriber" : "Add Subscriber"}</Text>
+            {!!formError && (
+              <View style={styles.formError} testID="customer-add-error-msg">
+                <Ionicons name="alert-circle" size={18} color={colors.error} />
+                <Text style={styles.formErrorText}>{formError}</Text>
+              </View>
+            )}
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               {!editing && canManage && (
                 <>
@@ -296,6 +379,20 @@ export default function SubscribersList() {
               )}
               <Text style={styles.label}>Name *</Text>
               <TextInput testID="sub-name" placeholder="Full name" placeholderTextColor={colors.muted} value={form.name} onChangeText={set("name")} style={styles.input} />
+              <Text style={styles.label}>ISP User ID *</Text>
+              <TextInput testID="subscriber-isp-user-id" placeholder="Portal customer / user ID" placeholderTextColor={colors.muted} value={form.isp_user_id} onChangeText={set("isp_user_id")} style={styles.input} />
+              <Text style={styles.label}>ISP Provider *</Text>
+              <View style={styles.chips} testID="isp-provider-options">
+                {ispProviders.map((provider) => (
+                  <Pressable key={provider.id} onPress={() => set("isp_provider")(provider.name)} style={[styles.chip, form.isp_provider === provider.name && { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary }]} testID={`isp-provider-${provider.id}`}>
+                    <Text style={[styles.chipTxt, form.isp_provider === provider.name && { color: "#FFFFFF" }]}>{provider.name}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <View style={styles.addIspRow}>
+                <TextInput testID="add-isp-provider-input" placeholder="Other ISP portal name" placeholderTextColor={colors.muted} value={newIsp} onChangeText={setNewIsp} style={[styles.input, { flex: 1, marginBottom: 0 }]} />
+                <Pressable onPress={addIspProvider} style={styles.addIspBtn} testID="add-isp-provider-btn"><Text style={styles.addIspTxt}>Add ISP</Text></Pressable>
+              </View>
               <Text style={styles.label}>Address</Text>
               <TextInput testID="sub-address" placeholder="House no, area, city" placeholderTextColor={colors.muted} value={form.address} onChangeText={set("address")} style={styles.input} />
               <View style={{ flexDirection: "row", gap: 10 }}>
@@ -321,7 +418,7 @@ export default function SubscribersList() {
               <Text style={styles.label}>Notes</Text>
               <TextInput testID="sub-notes" placeholder="Landmark, contact person, etc." placeholderTextColor={colors.muted} value={form.notes} onChangeText={set("notes")} style={styles.input} />
 
-              {!editing && (
+              {!editing && isSuper && (
                 <>
                   <Text style={styles.label}>Activate Plan (optional)</Text>
                   <View style={styles.chips}>
@@ -335,12 +432,14 @@ export default function SubscribersList() {
                     <>
                       <Text style={styles.label}>Payment Mode</Text>
                       <View style={styles.chips}>
-                        {PAY_MODES.map((m) => (
+                        {CREATE_PAY_MODES.map((m) => (
                           <Pressable key={m} onPress={() => setForm((f) => ({ ...f, payment_mode: m }))} style={[styles.chip, form.payment_mode === m && { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary }]} testID={`form-pay-${m}`}>
                             <Text style={[styles.chipTxt, form.payment_mode === m && { color: "#FFFFFF" }]}>{m.toUpperCase()}</Text>
                           </Pressable>
                         ))}
                       </View>
+                      <Text style={styles.label}>Expiry Date Override (optional)</Text>
+                      <TextInput testID="subscriber-expiry-date" placeholder="YYYY-MM-DD" placeholderTextColor={colors.muted} value={form.expiry_date} onChangeText={set("expiry_date")} style={styles.input} />
                     </>
                   )}
                 </>
@@ -350,6 +449,50 @@ export default function SubscribersList() {
               {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryTxt}>{editing ? "Save" : "Add"}</Text>}
             </Pressable>
             <Pressable onPress={() => setFormOpen(false)} style={styles.cancel} testID="cancel-subscriber-btn"><Text style={{ color: colors.muted, fontWeight: "600" }}>Cancel</Text></Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Super Admin bulk subscriber import */}
+      <Modal visible={bulkOpen} transparent animationType="slide" onRequestClose={() => setBulkOpen(false)}>
+        <KeyboardAvoidingView style={styles.modalBg} behavior={Platform.OS === "ios" ? "padding" : undefined} testID="bulk-user-import-modal">
+          <View style={[styles.sheet, { paddingBottom: insets.bottom + 16, maxHeight: "92%" }]}> 
+            <View style={styles.grabber} />
+            <Text style={styles.modalTitle}>Bulk Add Customers</Text>
+            <Text style={styles.bulkHelp}>हर line: Name, Phone, ISP User ID, ISP Provider, Address (optional)</Text>
+            <TextInput
+              testID="bulk-user-csv-input"
+              value={bulkText}
+              onChangeText={(text) => { setBulkText(text); setBulkResult(null); }}
+              placeholder={"Rahul,9876543210,ANO-101,Anonet,Delhi\nNeha,9876543211,GT-202,GTPL"}
+              placeholderTextColor={colors.muted}
+              multiline
+              textAlignVertical="top"
+              autoCorrect={false}
+              style={styles.bulkInput}
+            />
+            <View style={styles.bulkSummary} testID="bulk-user-preview-table">
+              <Text style={styles.bulkSummaryText}>Rows: {bulkPreview.total}</Text>
+              <Text style={[styles.bulkSummaryText, { color: colors.success }]}>Ready: {bulkPreview.users.length}</Text>
+              <Text style={[styles.bulkSummaryText, { color: bulkPreview.errors.length ? colors.error : colors.muted }]}>Errors: {bulkPreview.errors.length}</Text>
+            </View>
+            {bulkPreview.errors.slice(0, 3).map((error) => <Text key={error} style={styles.bulkError}>{error}</Text>)}
+            {bulkResult && (
+              <View style={styles.bulkResult} testID="bulk-user-import-result">
+                <Text style={styles.bulkResultTitle}>{bulkResult.created_count} customer add हुए</Text>
+                {bulkResult.errors.slice(0, 4).map((error) => <Text key={`${error.row}-${error.message}`} style={styles.bulkError}>Row {error.row}: {error.message}</Text>)}
+              </View>
+            )}
+            <Pressable
+              onPress={importBulk}
+              disabled={bulkSaving || !bulkPreview.users.length || !!bulkPreview.errors.length}
+              accessibilityState={{ disabled: bulkSaving || !bulkPreview.users.length || !!bulkPreview.errors.length }}
+              style={[styles.primaryBtn, { backgroundColor: colors.brandPrimary, opacity: bulkSaving || !bulkPreview.users.length || !!bulkPreview.errors.length ? 0.55 : 1 }]}
+              testID="submit-bulk-user-import-btn"
+            >
+              {bulkSaving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryTxt}>Import {bulkPreview.users.length || ""} Customers</Text>}
+            </Pressable>
+            <Pressable onPress={() => setBulkOpen(false)} style={styles.cancel} testID="close-bulk-user-import-btn"><Text style={{ color: colors.muted, fontWeight: "600" }}>Close</Text></Pressable>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -382,6 +525,8 @@ export default function SubscribersList() {
                 </Pressable>
               ))}
             </View>
+            <Text style={styles.label}>Expiry Date Override (optional)</Text>
+            <TextInput testID="admin-payment-expiry-date" placeholder="YYYY-MM-DD · blank = plan validity" placeholderTextColor={colors.muted} value={paymentExpiryDate} onChangeText={setPaymentExpiryDate} style={styles.input} />
             {payMode === "upi" && (
               <>
                 <Text style={styles.label}>UPI Screenshot *</Text>
@@ -396,7 +541,7 @@ export default function SubscribersList() {
             <Pressable onPress={assign} disabled={saving || paymentUploading} style={[styles.primaryBtn, { backgroundColor: colors.brandPrimary, opacity: saving ? 0.8 : 1 }]} testID="confirm-assign-plan">
               {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryTxt}>{payMode === "upi" ? "Save UPI & Activate" : "Save Cash & Activate"}</Text>}
             </Pressable>
-            <Pressable onPress={() => setPlanOpen(false)} style={styles.cancel}><Text style={{ color: colors.muted, fontWeight: "600" }}>Cancel</Text></Pressable>
+            <Pressable onPress={() => setPlanOpen(false)} style={styles.cancel} testID="cancel-admin-payment-btn"><Text style={{ color: colors.muted, fontWeight: "600" }}>Cancel</Text></Pressable>
           </View>
         </View>
       </Modal>
@@ -436,7 +581,10 @@ function DetailRow({ icon, label, value }: { icon: any; label: string; value?: s
 
 const useStyles = makeStyles((colors) => ({
   header: { paddingHorizontal: 20, paddingBottom: 12, backgroundColor: colors.surfaceSecondary, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 10 },
+  titleRow: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   title: { fontSize: 22, fontWeight: "800", color: colors.onSurface },
+  bulkHeaderBtn: { minHeight: 44, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.brandPrimary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  bulkHeaderText: { color: colors.brandPrimary, fontSize: 12, fontWeight: "800" },
   searchBox: { flexDirection: "row", alignItems: "center", gap: 8, height: 44, borderRadius: 12, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12 },
   searchInput: { flex: 1, color: colors.onSurface, fontSize: 15, height: 44 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center" },
@@ -458,7 +606,19 @@ const useStyles = makeStyles((colors) => ({
   modalSub: { fontSize: 12, color: colors.muted, marginTop: 2 },
   label: { fontSize: 12, fontWeight: "700", color: colors.onSurface, marginTop: 12, marginBottom: 6 },
   input: { height: 48, borderRadius: 12, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, color: colors.onSurface, fontSize: 15 },
+  formError: { marginTop: 12, minHeight: 44, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FEE2E2" },
+  formErrorText: { flex: 1, color: colors.error, fontSize: 12, fontWeight: "700" },
+  bulkHelp: { marginTop: 8, color: colors.muted, fontSize: 12, lineHeight: 18 },
+  bulkInput: { minHeight: 180, maxHeight: 260, marginTop: 12, borderRadius: 14, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border, padding: 14, color: colors.onSurface, fontSize: 14, lineHeight: 21 },
+  bulkSummary: { minHeight: 44, marginTop: 10, borderRadius: 12, backgroundColor: colors.surfaceTertiary, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  bulkSummaryText: { color: colors.onSurface, fontSize: 12, fontWeight: "800" },
+  bulkError: { color: colors.error, fontSize: 11, marginTop: 5 },
+  bulkResult: { marginTop: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary },
+  bulkResultTitle: { color: colors.success, fontSize: 13, fontWeight: "800" },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  addIspRow: { flexDirection: "row", gap: 8, alignItems: "center" },
+  addIspBtn: { minWidth: 76, minHeight: 44, borderRadius: 12, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center", paddingHorizontal: 10 },
+  addIspTxt: { color: "#FFFFFF", fontWeight: "800", fontSize: 12 },
   chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary },
   chipTxt: { fontSize: 12, fontWeight: "700", color: colors.onSurface },
   planRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary },

@@ -119,7 +119,12 @@ export default function SubscriberHome() {
           <View style={styles.planCard} testID="active-plan-card">
             <View style={styles.planHeader}>
               <View style={{ flex: 1, paddingRight: 8 }}>
-                <Text style={styles.planLabel}>Active Plan</Text>
+                <View style={styles.activeLabelRow}>
+                  <Text style={styles.planLabel}>Current Plan</Text>
+                  <View style={styles.activeBadge} testID="active-plan-status">
+                    <Text style={styles.activeBadgeText}>ACTIVE</Text>
+                  </View>
+                </View>
                 <Text style={styles.planName} testID="active-plan-name">{sub.plan_name}</Text>
               </View>
               <View style={styles.speedBadge}>
@@ -151,6 +156,14 @@ export default function SubscriberHome() {
                 Expires {dayjs(sub.expires_at).format("DD MMM YYYY")} · {daysLeft} days left
               </Text>
             </View>
+            <Pressable
+              onPress={() => router.push("/(subscriber)/recharge")}
+              style={({ pressed }) => [styles.upgradeBtn, { borderColor: colors.brandPrimary, opacity: pressed ? 0.75 : 1 }]}
+              testID="upgrade-plan-trigger-btn"
+            >
+              <Ionicons name="swap-horizontal" size={18} color={colors.brandPrimary} />
+              <Text style={[styles.upgradeBtnText, { color: colors.brandPrimary }]}>Upgrade / Change Plan</Text>
+            </Pressable>
           </View>
           </>
         ) : !error ? (
@@ -235,6 +248,9 @@ const useStyles = makeStyles((colors) => ({
   balancePayTxt: { color: "#FFFFFF", fontSize: 12, fontWeight: "800" },
   planHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 },
   planLabel: { fontSize: 12, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.5 },
+  activeLabelRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  activeBadge: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 999, backgroundColor: "#D1FAE5" },
+  activeBadgeText: { color: "#065F46", fontSize: 9, fontWeight: "900", letterSpacing: 0.4 },
   planName: { fontSize: 20, fontWeight: "800", color: colors.onSurface, marginTop: 2 },
   speedBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.brandPrimary, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
   speedText: { color: "#FFFFFF", fontWeight: "700", fontSize: 12 },
@@ -246,6 +262,8 @@ const useStyles = makeStyles((colors) => ({
   unlimited: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 },
   expiryRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 16 },
   expiryText: { color: colors.muted, fontSize: 12 },
+  upgradeBtn: { marginTop: 16, minHeight: 46, borderRadius: 12, borderWidth: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  upgradeBtnText: { fontSize: 14, fontWeight: "800" },
   emptyCard: {
     padding: 32, alignItems: "center", backgroundColor: colors.surfaceSecondary,
     borderRadius: 20, borderWidth: 1, borderColor: colors.border,

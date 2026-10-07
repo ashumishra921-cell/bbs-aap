@@ -102,8 +102,25 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Dashboard UPI shortcut, UPI/Cash payment history for subscribers/admin, complaint/payment receive tones. User opted OUT of new cash entry and pending four earlier features. Also reported Super Admin activated plans not appearing in subscriber app."
+user_problem_statement: "Customer add नहीं हो रहा; subscriber app में active plan और Upgrade Plan option चाहिए; AI screen पर 8826004211 call option और Super Admin bulk customer add चाहिए."
 backend:
+  - task: "Customer creation, active-plan assignment and Super Admin bulk import"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: high
+    needs_retesting: false
+    status_history:
+      - agent: user
+        working: false
+        comment: "User reported customer add was not working."
+      - agent: main
+        working: true
+        comment: "Fixed legacy active plan lookup ($ne false), added ISP fields/manual expiry validation and Super Admin-only bulk endpoint (max 200, row-level results). Authenticated curl verified single create, manual-expiry activation, active-plan list visibility, two-user bulk create and cleanup. WhatsBoost was not called because the test customer was opted out before activation."
+      - agent: testing
+        working: true
+        comment: "Iteration 21 backend passed 6/6: single create, ISP persistence, legacy active-plan compatibility, manual expiry, bulk counts/errors, and role restrictions."
   - task: "Role-scoped unified payment history and activity snapshots"
     implemented: true
     working: true
@@ -154,6 +171,20 @@ backend:
         working: NA
         comment: "Verified a fresh non-demo request created an active real OTP challenge (masked suffix only), so it is not taking the demo route. Updated Login and OTP wording to explicitly state that 123456 works only for four 999... demo accounts; TypeScript lint and 390px preview pass. Traccar source returns HTTP 200 immediately after Android SmsManager call and has no sent/delivery callback, leaving a device/app/carrier-level silent failure after accepted requests." 
 frontend:
+  - task: "Customer form repair, active plan upgrade action, AI call and bulk-add UI"
+    implemented: true
+    working: true
+    file: "frontend/app/(admin)/subscribers.tsx"
+    stuck_count: 0
+    priority: high
+    needs_retesting: false
+    status_history:
+      - agent: main
+        working: NA
+        comment: "Added inline customer-form errors, ISP/User ID/manual expiry wiring, unsupported initial UPI choice removal, Super Admin bulk paste/preview/import sheet, active plan badge + Upgrade/Change Plan action, and AI Human Support call button for 8826004211. TypeScript/changed-file lint pass and 390x844 preview login renders."
+      - agent: testing
+        working: true
+        comment: "Iteration 21 mobile UI passed role controls, valid/malformed bulk behavior, active-plan Upgrade navigation, AI Call CTA and 390x844 overflow checks."
   - task: "Subscriber live plan visibility"
     implemented: true
     working: true
@@ -205,10 +236,14 @@ frontend:
 metadata:
   created_by: main_agent
   version: "1.0"
-  test_sequence: 9
+  test_sequence: 21
   run_ui: true
 test_plan:
   current_focus:
+    - "Customer creation with ISP User ID/provider and optional active plan/manual expiry"
+    - "Super Admin bulk customer import; Admin/Team/Subscriber role denial"
+    - "Subscriber active plan card and Upgrade/Change Plan navigation"
+    - "AI Support 8826004211 call action"
     - "Security remediation: static-demo OTP removal, expiring/revocable JWT, rate limits, CORS and role-based invoice access"
     - "Traccar delivery and OTP verification on a non-demo Subscriber or Team phone"
     - "Live subscriber plan update from Super Admin assignment, without navigation/manual refresh"
@@ -219,6 +254,8 @@ test_plan:
   test_all: false
   test_priority: high_first
 agent_communication:
+  - agent: main
+    message: "Current feature batch ready for Iteration 21. Use locally generated short-lived JWTs only; do not send OTP. Keep WhatsBoost MOCKED and make zero live provider calls. Verify both backend and frontend, including role restrictions, row errors, customer cleanup, 390x844 layout, and all listed testIDs."
   - agent: main
     message: "TypeScript and changed-file JS/Python lint pass. 390x844 preview login screenshot passes. Test only current scope; leave earlier Expiry SMS, Collection Report, Technician Location, Plan Editor testing deferred. Read memory/test_credentials.md, update for any test accounts created; do not alter production auth."
   - agent: testing
@@ -267,3 +304,5 @@ agent_communication:
     message: "Iteration 18 independently confirmed the reported Pay touch-target defect is fixed at minHeight 44; preview smoke passed and no WhatsBoost message was sent. Authenticated runtime due-card proof remains deferred because no safe session/token was supplied."
   - agent: testing
     message: "Iteration 16 Super Admin phone migration regression passed 5/5 with WhatsBoost MOCKED. Unique active Super Admin identity, archived prior Admin/data preservation, retired old-number provider bypass, archived-session rejection and health/auth config all passed. No live WhatsApp send was performed."
+  - agent: testing
+    message: "Iteration 21 complete: backend pytest passed 6/6 for subscriber create + legacy-plan/manual-expiry + super-admin bulk import and role denials, using local JWTs and cleanup. Mobile UI regression (public preview) verified login load, Super/Admin/Team/Subscriber role controls, subscriber ACTIVE card with Upgrade→Recharge navigation, bulk malformed-row blocking behavior, valid bulk result rendering, AI Support number 8826004211 + Call CTA visibility, and 390x844 no-horizontal-overflow checks. WhatsBoost remained MOCKED/untouched; no live provider calls were made."

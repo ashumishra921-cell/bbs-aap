@@ -123,7 +123,7 @@ export const api = {
   fileUrl: (path: string) => `${BASE}/api/files/${path}`,
   createPayment: (b: { plan_id: string; screenshot_path: string; utr?: string }) =>
     request<any>("/payments", { method: "POST", body: JSON.stringify(b) }),
-  createAdminPaymentEntry: (b: { subscriber_id: string; plan_id: string; payment_mode: "cash" | "upi"; screenshot_path?: string; utr?: string }) =>
+  createAdminPaymentEntry: (b: { subscriber_id: string; plan_id: string; payment_mode: "cash" | "upi"; screenshot_path?: string; utr?: string; expiry_date?: string }) =>
     request<any>("/admin/payment-entries", { method: "POST", body: JSON.stringify(b) }),
   payments: () => request<any[]>("/payments"),
   approvePayment: (id: string) => request<any>(`/payments/${id}/approve`, { method: "POST" }),
@@ -152,8 +152,12 @@ export const api = {
   deleteTeam: (id: string) => request(`/team/${id}`, { method: "DELETE" }),
 
   subscribers: () => request<any[]>("/subscribers"),
+  ispProviders: () => request<any[]>("/isp-providers"),
+  createIspProvider: (name: string) => request<any>("/isp-providers", { method: "POST", body: JSON.stringify({ name }) }),
   createSubscriber: (b: Record<string, any>) =>
     request<any>("/subscribers", { method: "POST", body: JSON.stringify(b) }),
+  createSubscribersBulk: (users: { phone: string; name: string; isp_user_id: string; isp_provider: string; address?: string }[]) =>
+    request<{ created_count: number; error_count: number; created: any[]; errors: { row: number; phone: string; message: string }[] }>("/subscribers/bulk", { method: "POST", body: JSON.stringify({ users }) }),
   updateSubscriber: (id: string, b: Record<string, any>) =>
     request<any>(`/subscribers/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
   assignPlan: (id: string, plan_id: string, payment_mode: string) =>

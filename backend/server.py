@@ -18,7 +18,7 @@ import requests
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date, time
 from pymongo.errors import DuplicateKeyError
 
 ROOT_DIR = Path(__file__).parent
@@ -82,6 +82,8 @@ class User(BaseModel):
     security_deposit: Optional[float] = None
     installation_date: Optional[str] = None
     notes: Optional[str] = None
+    isp_user_id: Optional[str] = None
+    isp_provider: Optional[str] = None
     whatsapp_updates: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -208,8 +210,23 @@ class CreateSubscriberBody(BaseModel):
     security_deposit: Optional[float] = None
     installation_date: Optional[str] = None
     notes: Optional[str] = None
+    isp_user_id: str
+    isp_provider: str
+    expiry_date: Optional[str] = None
     plan_id: Optional[str] = None
     payment_mode: Literal["cash", "upi", "free"] = "cash"
+
+
+class BulkSubscriberItem(BaseModel):
+    phone: str
+    name: str
+    isp_user_id: str
+    isp_provider: str
+    address: Optional[str] = None
+
+
+class BulkSubscriberBody(BaseModel):
+    users: List[BulkSubscriberItem] = Field(min_length=1, max_length=200)
 
 
 class AdminPaymentEntryBody(BaseModel):
@@ -218,6 +235,7 @@ class AdminPaymentEntryBody(BaseModel):
     payment_mode: Literal["cash", "upi"]
     screenshot_path: Optional[str] = None
     utr: Optional[str] = None
+    expiry_date: Optional[str] = None
 
 
 class UpdateSubscriberBody(BaseModel):
@@ -228,11 +246,18 @@ class UpdateSubscriberBody(BaseModel):
     security_deposit: Optional[float] = None
     installation_date: Optional[str] = None
     notes: Optional[str] = None
+    isp_user_id: Optional[str] = None
+    isp_provider: Optional[str] = None
 
 
 class AssignPlanBody(BaseModel):
     plan_id: str
     payment_mode: Literal["cash", "upi", "free"] = "cash"
+    expiry_date: Optional[str] = None
+
+
+class IspProviderBody(BaseModel):
+    name: str
 
 
 class ChatBody(BaseModel):
@@ -312,6 +337,28 @@ def normalize_phone(value: str) -> str:
     if not re.fullmatch(r"[6-9]\d{9}", digits):
         raise HTTPException(status_code=400, detail="कृपया सही 10 अंकों का मोबाइल नंबर दर्ज करें")
     return digits
+
+
+def normalize_isp_name(name: str) -> str:
+    cleaned = " ".join(name.strip().split())
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="ISP provider का नाम आवश्यक है")
+    if len(cleaned) > 80:
+        raise HTTPException(status_code=400, detail="ISP provider नाम बहुत लंबा है")
+    return cleaned
+
+
+def expiry_override_to_utc(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        selected = date.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Expiry date YYYY-MM-DD format में दें")
+    india_tz = timezone(timedelta(hours=5, minutes=30))
+    if selected < datetime.now(india_tz).date():
+        raise HTTPException(status_code=400, detail="Expiry date आज या भविष्य की चुनें")
+    return datetime.combine(selected, time(23, 59, 59), tzinfo=india_tz).astimezone(timezone.utc)
 
 
 def uses_mock_otp(phone: str, user: Optional[dict] = None) -> bool:
@@ -812,7 +859,7 @@ async def my_pending_balance(user: dict = Depends(require_role("subscriber"))):
     }
 
 
-async def activate_plan(user: dict, plan: dict, payment_mode: str, upi_id: Optional[str] = None) -> dict:
+async def activate_plan(user: dict, plan: dict, payment_mode: str, upi_id: Optional[str] = None, expires_at_override: Optional[datetime] = None) -> dict:
     now = datetime.now(timezone.utc)
     invoice_no = f"INV-{now.strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}"
     invoice = Invoice(
@@ -838,7 +885,7 @@ async def activate_plan(user: dict, plan: dict, payment_mode: str, upi_id: Optio
         data_gb=plan["data_gb"],
         used_gb=0.0,
         started_at=now,
-        expires_at=now + timedelta(days=plan["validity_days"]),
+        expires_at=expires_at_override or (now + timedelta(days=plan["validity_days"])),
         status="active",
     )
     await db.subscriptions.insert_one(sub.model_dump())
@@ -1008,7 +1055,7 @@ async def validate_admin_screenshot(path: Optional[str], actor: dict, required: 
 
 async def record_admin_payment(target: dict, plan: dict, body: AdminPaymentEntryBody, actor: dict) -> dict:
     await validate_admin_screenshot(body.screenshot_path, actor, body.payment_mode == "upi")
-    activated = await activate_plan(target, plan, body.payment_mode, (body.utr or "").strip() or None)
+    activated = await activate_plan(target, plan, body.payment_mode, (body.utr or "").strip() or None, expiry_override_to_utc(body.expiry_date))
     payment = PaymentRequest(
         user_id=target["id"], user_name=target["name"], user_phone=target["phone"],
         plan_id=plan["id"], plan_name=plan["name"], amount=plan["price"],
@@ -1023,7 +1070,7 @@ async def record_admin_payment(target: dict, plan: dict, body: AdminPaymentEntry
 @api_router.post("/admin/payment-entries")
 async def create_admin_payment_entry(body: AdminPaymentEntryBody, user: dict = Depends(require_role("admin", "super_admin"))):
     target = await db.users.find_one({"id": body.subscriber_id, "role": "subscriber"}, {"_id": 0})
-    plan = await db.plans.find_one({"id": body.plan_id, "active": True}, {"_id": 0})
+    plan = await db.plans.find_one({"id": body.plan_id, "active": {"$ne": False}}, {"_id": 0})
     if not target or not plan:
         raise HTTPException(status_code=404, detail="Subscriber या active plan नहीं मिला")
     return await record_admin_payment(target, plan, body, user)
@@ -1295,6 +1342,29 @@ async def list_subscribers(user: dict = Depends(require_role("admin", "super_adm
     return items
 
 
+async def ensure_isp_provider(name: str) -> str:
+    provider = normalize_isp_name(name)
+    now = datetime.now(timezone.utc)
+    await db.isp_providers.update_one(
+        {"name_key": provider.casefold()},
+        {"$setOnInsert": {"id": str(uuid.uuid4()), "name": provider, "name_key": provider.casefold(), "created_at": now}},
+        upsert=True,
+    )
+    return provider
+
+
+@api_router.get("/isp-providers")
+async def list_isp_providers(user: dict = Depends(require_role("admin", "super_admin", "team"))):
+    items = await db.isp_providers.find({}, {"_id": 0}).sort("name", 1).to_list(100)
+    return items
+
+
+@api_router.post("/isp-providers")
+async def create_isp_provider(body: IspProviderBody, user: dict = Depends(require_role("admin", "super_admin"))):
+    provider = await ensure_isp_provider(body.name)
+    return await db.isp_providers.find_one({"name_key": provider.casefold()}, {"_id": 0})
+
+
 @api_router.post("/subscribers")
 async def create_subscriber(body: CreateSubscriberBody, user: dict = Depends(require_role("admin", "super_admin"))):
     phone = normalize_phone(body.phone)
@@ -1302,26 +1372,76 @@ async def create_subscriber(body: CreateSubscriberBody, user: dict = Depends(req
         raise HTTPException(status_code=400, detail="Name is required")
     if await db.users.find_one({"phone": phone}):
         raise HTTPException(status_code=400, detail="Phone already exists")
+    isp_user_id = body.isp_user_id.strip()
+    if not isp_user_id:
+        raise HTTPException(status_code=400, detail="ISP User ID आवश्यक है")
+    if await db.users.find_one({"isp_user_id": isp_user_id}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="ISP User ID पहले से मौजूद है")
+    isp_provider = await ensure_isp_provider(body.isp_provider)
     plan = None
     if body.plan_id:
-        plan = await db.plans.find_one({"id": body.plan_id, "active": True}, {"_id": 0})
+        plan = await db.plans.find_one({"id": body.plan_id, "active": {"$ne": False}}, {"_id": 0})
         if not plan:
             raise HTTPException(status_code=404, detail="Plan not found")
         if body.payment_mode == "upi":
             raise HTTPException(status_code=400, detail="UPI screenshot के लिए subscriber बनाने के बाद Daily Payment Entry का उपयोग करें")
-    fields = body.model_dump(exclude={"phone", "name", "plan_id", "payment_mode"})
-    new_user = User(phone=phone, name=body.name.strip(), role="subscriber", **fields)
+    fields = body.model_dump(exclude={"phone", "name", "plan_id", "payment_mode", "expiry_date", "isp_user_id", "isp_provider"})
+    new_user = User(phone=phone, name=body.name.strip(), role="subscriber", isp_user_id=isp_user_id, isp_provider=isp_provider, **fields)
     doc = new_user.model_dump()
     await db.users.insert_one(doc)
     result = clean(doc)
     if plan:
         if body.payment_mode == "cash":
             result["activated"] = await record_admin_payment(
-                result, plan, AdminPaymentEntryBody(subscriber_id=result["id"], plan_id=plan["id"], payment_mode="cash"), user,
+                result, plan, AdminPaymentEntryBody(subscriber_id=result["id"], plan_id=plan["id"], payment_mode="cash", expiry_date=body.expiry_date), user,
             )
         else:
-            result["activated"] = await activate_plan(result, plan, body.payment_mode)
+            result["activated"] = await activate_plan(result, plan, body.payment_mode, expires_at_override=expiry_override_to_utc(body.expiry_date))
     return result
+
+
+@api_router.post("/subscribers/bulk")
+async def create_subscribers_bulk(body: BulkSubscriberBody, user: dict = Depends(require_role("super_admin"))):
+    created = []
+    errors = []
+    batch_phones: set[str] = set()
+    batch_isp_ids: set[str] = set()
+    for row_number, item in enumerate(body.users, start=1):
+        try:
+            phone = normalize_phone(item.phone)
+            name = item.name.strip()
+            isp_user_id = item.isp_user_id.strip()
+            if not name:
+                raise HTTPException(status_code=400, detail="Name आवश्यक है")
+            if not isp_user_id:
+                raise HTTPException(status_code=400, detail="ISP User ID आवश्यक है")
+            if phone in batch_phones:
+                raise HTTPException(status_code=400, detail="इस file में phone दोबारा है")
+            if isp_user_id.casefold() in batch_isp_ids:
+                raise HTTPException(status_code=400, detail="इस file में ISP User ID दोबारा है")
+            if await db.users.find_one({"phone": phone}, {"_id": 0, "id": 1}):
+                raise HTTPException(status_code=400, detail="Phone पहले से मौजूद है")
+            if await db.users.find_one({"isp_user_id": isp_user_id}, {"_id": 0, "id": 1}):
+                raise HTTPException(status_code=400, detail="ISP User ID पहले से मौजूद है")
+            provider = await ensure_isp_provider(item.isp_provider)
+            new_user = User(
+                phone=phone,
+                name=name,
+                role="subscriber",
+                address=(item.address or "").strip() or None,
+                isp_user_id=isp_user_id,
+                isp_provider=provider,
+            )
+            doc = new_user.model_dump()
+            await db.users.insert_one(doc)
+            created.append(clean(doc))
+            batch_phones.add(phone)
+            batch_isp_ids.add(isp_user_id.casefold())
+        except HTTPException as exc:
+            errors.append({"row": row_number, "phone": item.phone, "message": exc.detail})
+        except DuplicateKeyError:
+            errors.append({"row": row_number, "phone": item.phone, "message": "Phone या ISP User ID पहले से मौजूद है"})
+    return {"created_count": len(created), "error_count": len(errors), "created": created, "errors": errors}
 
 
 @api_router.patch("/subscribers/{uid}")
@@ -1332,6 +1452,15 @@ async def update_subscriber(uid: str, body: UpdateSubscriberBody, user: dict = D
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if "name" in updates and not updates["name"].strip():
         raise HTTPException(status_code=400, detail="Name is required")
+    if "isp_user_id" in updates:
+        updates["isp_user_id"] = updates["isp_user_id"].strip()
+        if not updates["isp_user_id"]:
+            raise HTTPException(status_code=400, detail="ISP User ID आवश्यक है")
+        duplicate = await db.users.find_one({"isp_user_id": updates["isp_user_id"], "id": {"$ne": uid}}, {"_id": 0, "id": 1})
+        if duplicate:
+            raise HTTPException(status_code=400, detail="ISP User ID पहले से मौजूद है")
+    if "isp_provider" in updates:
+        updates["isp_provider"] = await ensure_isp_provider(updates["isp_provider"])
     if updates:
         await db.users.update_one({"id": uid}, {"$set": updates})
     return clean(await db.users.find_one({"id": uid}, {"_id": 0}))
@@ -1342,10 +1471,10 @@ async def assign_plan(uid: str, body: AssignPlanBody, user: dict = Depends(requi
     target = await db.users.find_one({"id": uid, "role": "subscriber"}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="Subscriber not found")
-    plan = await db.plans.find_one({"id": body.plan_id}, {"_id": 0})
+    plan = await db.plans.find_one({"id": body.plan_id, "active": {"$ne": False}}, {"_id": 0})
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
-    return await activate_plan(target, plan, body.payment_mode)
+    return await activate_plan(target, plan, body.payment_mode, expires_at_override=expiry_override_to_utc(body.expiry_date))
 
 
 @api_router.delete("/subscribers/{uid}")
@@ -1672,6 +1801,10 @@ async def startup():
     await db.revoked_tokens.create_index("expires_at", expireAfterSeconds=0)
     await db.revoked_tokens.create_index("jti", unique=True)
     await db.whatsapp_notifications.create_index("event_key", unique=True)
+    await db.users.create_index("isp_user_id", unique=True, sparse=True)
+    await db.isp_providers.create_index("name_key", unique=True)
+    for provider in ("Anonet", "Zepbyt", "GTPL"):
+        await ensure_isp_provider(provider)
     await seed()
     asyncio.create_task(reminder_loop())
     try:

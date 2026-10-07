@@ -4,9 +4,9 @@ import {
   ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -43,7 +43,7 @@ export default function ChatScreen() {
             {
               id: "welcome",
               role: "assistant",
-              text: "नमस्ते! 👋 मैं Broadband Solutions 24×7 का AI सहायक हूँ। मैं आपकी क्या मदद कर सकता हूँ? (जैसे: प्लान, रिचार्ज, धीमा इंटरनेट, बिल)",
+              text: "नमस्ते! मैं Broadband Solutions 24×7 का AI सहायक हूँ। मैं आपकी क्या मदद कर सकता हूँ? (जैसे: प्लान, रिचार्ज, धीमा इंटरनेट, बिल)",
             },
           ]);
         } else {
@@ -51,7 +51,7 @@ export default function ChatScreen() {
         }
       } finally { setLoading(false); }
     })();
-  }, []);
+  }, [router]);
 
   const send = async () => {
     const text = input.trim();
@@ -76,6 +76,14 @@ export default function ChatScreen() {
       setMsgs([{ id: "welcome", role: "assistant", text: "चैट साफ़ हो गई। कैसे मदद करूँ?" }]);
       toast.show("Cleared", "success");
     } catch {}
+  };
+
+  const callSupport = async () => {
+    try {
+      await Linking.openURL("tel:8826004211");
+    } catch {
+      toast.show("Call app नहीं खुल पाया। 8826004211 पर संपर्क करें।", "error");
+    }
   };
 
   return (
@@ -105,9 +113,24 @@ export default function ChatScreen() {
           data={msgs}
           keyExtractor={(m) => m.id}
           contentContainerStyle={{ padding: 16, gap: 10 }}
+          ListHeaderComponent={(
+            <View style={styles.supportCard} testID="ai-support-widget">
+              <View style={styles.supportIcon}>
+                <Ionicons name="headset" size={22} color={colors.brandPrimary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.supportTitle}>Human Support</Text>
+                <Text style={styles.supportNumber} testID="ai-support-phone-number">8826004211</Text>
+              </View>
+              <Pressable onPress={callSupport} style={styles.callBtn} testID="ai-call-support-btn">
+                <Ionicons name="call" size={18} color={colors.onBrandPrimary} />
+                <Text style={styles.callBtnText}>Call</Text>
+              </Pressable>
+            </View>
+          )}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
           renderItem={({ item }) => (
-            <View style={[styles.bubbleWrap, item.role === "user" ? { alignItems: "flex-end" } : { alignItems: "flex-start" }]}>
+            <View testID={`chat-message-${item.id}`} style={[styles.bubbleWrap, item.role === "user" ? { alignItems: "flex-end" } : { alignItems: "flex-start" }]}> 
               <View
                 style={[
                   styles.bubble,
@@ -158,6 +181,12 @@ const useStyles = makeStyles((colors) => ({
   headerSub: { fontSize: 11, color: colors.muted },
   bubbleWrap: {},
   bubble: { maxWidth: "80%", paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16 },
+  supportCard: { minHeight: 72, marginBottom: 8, padding: 12, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, flexDirection: "row", alignItems: "center", gap: 10 },
+  supportIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: colors.brandTertiary, alignItems: "center", justifyContent: "center" },
+  supportTitle: { color: colors.onSurface, fontSize: 13, fontWeight: "800" },
+  supportNumber: { color: colors.muted, fontSize: 13, marginTop: 2 },
+  callBtn: { minWidth: 76, minHeight: 44, paddingHorizontal: 12, borderRadius: 12, backgroundColor: colors.brandPrimary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  callBtnText: { color: colors.onBrandPrimary, fontWeight: "800", fontSize: 13 },
   inputBar: {
     flexDirection: "row", alignItems: "flex-end", gap: 8, padding: 12,
     backgroundColor: colors.surfaceSecondary, borderTopWidth: 1, borderTopColor: colors.border,

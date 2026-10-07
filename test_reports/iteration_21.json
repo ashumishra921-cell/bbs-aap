@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 21 both-side regression completed. Backend APIs for subscriber create/legacy-plan/manual-expiry and super-admin bulk import passed, and mobile-first UI flows validated on public preview with role checks, active-plan upgrade navigation, bulk-import behavior, AI support card, and 390x844 responsive sanity.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter21_subscribers_bulk_roles.py",
+    "/app/test_reports/pytest/iter21_subscribers_bulk_roles.xml",
+    "/app/test_reports/artifacts_iter21_ui/role_checks_subscribers.jpeg",
+    "/app/test_reports/artifacts_iter21_ui/mobile_preview_loaded.jpeg"
+  ],
+  "action_items": [
+    "Optional hardening: expose explicit disabled/accessibility state for malformed bulk-import submit button on web to avoid force-click ambiguity in automation.",
+    "Optional config alignment: frontend/src/api.ts reads EXPO_PUBLIC_BACKEND_URL; ensure this stays aligned with deployment env naming policy."
+  ],
+  "critical_code_review_comments": [
+    "frontend/src/api.ts currently resolves backend URL from expoConfig.extra.backendUrl or EXPO_PUBLIC_BACKEND_URL; this differs from strict EXPO_BACKEND_URL-only policy in platform guidance.",
+    "Bulk import malformed rows are functionally blocked (row errors shown, no result produced) even when automation force-clicks submit."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter21_subscribers_bulk_roles.py",
+    "/app/test_reports/iteration_21.json",
+    "/app/test_result.md",
+    "/app/scripts/iter21_role_lookup.py"
+  ],
+  "success_rate": {
+    "backend": "100% (6/6)",
+    "frontend": "100% (requested Iter21 flows passed)"
+  },
+  "seed_data_creation": "Created temporary TEST_ITER21 subscribers/plans and two UI bulk users (8791100111, 8791100112); cleaned up after tests.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Auth testing used short-lived locally generated JWTs from JWT_SECRET + exact DB user IDs (no OTP). Public preview URL used. WhatsBoost remained MOCKED/untouched and no live provider HTTP calls were made.",
+  "rca_of_issue": "Initial pytest failure was test-data RCA only: generated phone values accidentally used hex characters, violating backend phone validator. Fixed test generator to numeric-only 10-digit phones; rerun passed fully."
+}

@@ -17,6 +17,8 @@ Customer creation must reliably capture ISP User ID, ISP provider and optional m
 - Super Admin bulk customer import accepts up to 200 pasted CSV-style rows with mobile preview, validation summary and per-row backend results; other roles are denied.
 - Subscriber Home displays an explicit ACTIVE plan card and Upgrade / Change Plan action leading to the recharge plan list.
 - AI Support displays human support number 8826004211 with a one-tap phone dial action.
+- Native login sessions are encrypted in SecureStore, migrate once from AsyncStorage, validate against `/auth/me` at startup, and remain valid for 30 days unless expired, revoked or logged out.
+- A lightweight `/api/health` check runs on app start/resume and every four active minutes; transient GET failures use bounded retries so a waking backend reconnects without duplicate POST actions.
 - Admin/Super Admin daily collection entry: both can add subscribers, record Cash or UPI payment, and activate a plan immediately. UPI requires an actor-owned screenshot (UTR optional); Cash uses a no-screenshot payment record and is shown safely in Payments.
 - Pending Balance: Subscriber Home shows ₹0 clear state or the latest expired-plan renewal amount with a Recharge action; Admin Collection Report provides the customer-wise Pending Balance follow-up list.
 - Complaint creation, automatic/administrative assignment, team work states, location sharing and status updates.

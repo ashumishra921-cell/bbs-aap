@@ -31,7 +31,7 @@ db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ.get('JWT_SECRET', '').strip()
 if len(JWT_SECRET) < 32:
     raise RuntimeError('JWT_SECRET must be a securely generated value of at least 32 characters')
-JWT_TTL_MINUTES = max(15, int(os.environ.get('JWT_TTL_MINUTES', '480')))
+JWT_TTL_MINUTES = max(15, int(os.environ.get('JWT_TTL_MINUTES', '43200')))
 APP_ENV = os.environ.get('APP_ENV', 'production').strip().lower()
 ALLOW_DEMO_OTP = APP_ENV == 'development' and os.environ.get('ALLOW_DEMO_OTP', '').strip().lower() == 'true'
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')

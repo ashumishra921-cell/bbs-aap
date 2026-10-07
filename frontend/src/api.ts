@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 
@@ -23,30 +24,63 @@ export type User = {
 
 const TOKEN_KEY = "auth_token";
 const USER_KEY = "auth_user";
+const isWeb = Platform.OS === "web";
 
 export async function saveAuth(token: string, user: User) {
-  await AsyncStorage.setItem(TOKEN_KEY, token);
-  await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
+  if (isWeb) {
+    await AsyncStorage.multiSet([[TOKEN_KEY, token], [USER_KEY, JSON.stringify(user)]]);
+    return;
+  }
+  await Promise.all([
+    SecureStore.setItemAsync(TOKEN_KEY, token, { keychainAccessible: SecureStore.WHEN_UNLOCKED }),
+    SecureStore.setItemAsync(USER_KEY, JSON.stringify(user)),
+  ]);
+  await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
 }
 
 export async function loadAuth(): Promise<{ token: string | null; user: User | null }> {
-  const token = await AsyncStorage.getItem(TOKEN_KEY);
-  const raw = await AsyncStorage.getItem(USER_KEY);
+  if (isWeb) {
+    const [token, raw] = await Promise.all([AsyncStorage.getItem(TOKEN_KEY), AsyncStorage.getItem(USER_KEY)]);
+    return { token, user: raw ? JSON.parse(raw) : null };
+  }
+  let [token, raw] = await Promise.all([SecureStore.getItemAsync(TOKEN_KEY), SecureStore.getItemAsync(USER_KEY)]);
+  if (!token) {
+    [token, raw] = await Promise.all([AsyncStorage.getItem(TOKEN_KEY), AsyncStorage.getItem(USER_KEY)]);
+    if (token) {
+      await SecureStore.setItemAsync(TOKEN_KEY, token, { keychainAccessible: SecureStore.WHEN_UNLOCKED });
+      if (raw) await SecureStore.setItemAsync(USER_KEY, raw);
+      await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
+    }
+  }
   return { token, user: raw ? JSON.parse(raw) : null };
 }
 
 export async function clearAuth() {
   await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
+  if (!isWeb) await Promise.all([SecureStore.deleteItemAsync(TOKEN_KEY), SecureStore.deleteItemAsync(USER_KEY)]);
 }
 
 async function request<T = any>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = await AsyncStorage.getItem(TOKEN_KEY);
+  const { token } = await loadAuth();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string> | undefined),
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${BASE}/api${path}`, { ...options, headers });
+  const attempts = (options.method || "GET").toUpperCase() === "GET" ? 3 : 1;
+  let res: Response | null = null;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      res = await fetch(`${BASE}/api${path}`, { ...options, headers });
+      if (![502, 503, 504].includes(res.status) || attempt === attempts - 1) break;
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts - 1) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 700 * (attempt + 1)));
+  }
+  if (!res) throw lastError instanceof Error ? lastError : new Error("Server unavailable");
   if (!res.ok) {
     if (res.status === 401) await clearAuth();
     let msg = `Request failed (${res.status})`;
@@ -77,6 +111,7 @@ export const api = {
   whatsappPreference: () => request<{ enabled: boolean }>("/me/whatsapp-preference"),
   updateWhatsappPreference: (enabled: boolean) => request<{ enabled: boolean }>("/me/whatsapp-preference", { method: "PATCH", body: JSON.stringify({ enabled }) }),
   logout: () => request<{ success: boolean }>("/auth/logout", { method: "POST" }),
+  health: () => request<{ status: string }>("/health"),
   deleteMyAccount: () => request("/auth/me", { method: "DELETE" }),
   badges: () => request<any>("/badges"),
   adminExpiring: (days = 3) => request<any[]>(`/admin/expiring?days=${days}`),
@@ -100,7 +135,7 @@ export const api = {
 
   paymentConfig: () => request<{ upi_id: string; payee_name: string }>("/payment-config"),
   uploadScreenshot: async (uri: string, name: string, type: string) => {
-    const token = await AsyncStorage.getItem(TOKEN_KEY);
+    const { token } = await loadAuth();
     const form = new FormData();
     if (Platform.OS === "web") {
       const blob = await (await fetch(uri)).blob();

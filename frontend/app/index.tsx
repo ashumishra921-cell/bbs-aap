@@ -14,7 +14,7 @@ import Ionicons from "@react-native-vector-icons/ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 
-import { api, loadAuth } from "@/src/api";
+import { api, clearAuth, loadAuth, saveAuth } from "@/src/api";
 import { useToast } from "@/src/components/Toast";
 import { makeStyles, useTheme } from "@/src/theme";
 
@@ -33,10 +33,18 @@ export default function LoginScreen() {
     (async () => {
       const { token, user } = await loadAuth();
       if (token && user) {
-        if (user.role === "subscriber") router.replace("/(subscriber)/home");
-        else if (user.role === "team") router.replace("/(team)/assigned");
+        let activeUser = user;
+        try {
+          activeUser = await api.me();
+          await saveAuth(token, activeUser);
+        } catch {
+          if (!(await loadAuth()).token) { setBooting(false); return; }
+        }
+        if (activeUser.role === "subscriber") router.replace("/(subscriber)/home");
+        else if (activeUser.role === "team") router.replace("/(team)/assigned");
         else router.replace("/(admin)/overview");
       } else {
+        if (token && !user) await clearAuth();
         setBooting(false);
         api.authConfig().then((c) => setSmsEnabled(c.sms_enabled)).catch(() => setSmsEnabled(false));
       }

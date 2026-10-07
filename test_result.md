@@ -102,8 +102,22 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Customer add नहीं हो रहा; subscriber app में active plan और Upgrade Plan option चाहिए; AI screen पर 8826004211 call option और Super Admin bulk customer add चाहिए."
+user_problem_statement: "Prevent server sleep with a light health ping/auto-reconnect strategy and keep users logged in through persistent secure authentication."
 backend:
+  - task: "30-day persistent JWT session"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: high
+    needs_retesting: false
+    status_history:
+      - agent: main
+        working: true
+        comment: "JWT TTL changed from 8 hours to 30 days while preserving exp, jti and revocation. Runtime token TTL and health endpoint self-check passed."
+      - agent: testing
+        working: true
+        comment: "Iteration 22 backend passed 6/6: /api/health 200, runtime make_token TTL=43200 minutes (~30 days), valid token /auth/me pass, expired or missing-jti token rejected, and logout revocation blocks reused token."
   - task: "Customer creation, active-plan assignment and Super Admin bulk import"
     implemented: true
     working: true
@@ -171,6 +185,20 @@ backend:
         working: NA
         comment: "Verified a fresh non-demo request created an active real OTP challenge (masked suffix only), so it is not taking the demo route. Updated Login and OTP wording to explicitly state that 123456 works only for four 999... demo accounts; TypeScript lint and 390px preview pass. Traccar source returns HTTP 200 immediately after Android SmsManager call and has no sent/delivery callback, leaving a device/app/carrier-level silent failure after accepted requests." 
 frontend:
+  - task: "SecureStore auth persistence and foreground server reconnect"
+    implemented: true
+    working: true
+    file: "frontend/src/api.ts"
+    stuck_count: 0
+    priority: high
+    needs_retesting: false
+    status_history:
+      - agent: main
+        working: NA
+        comment: "Native auth moved to SecureStore with one-time AsyncStorage migration and web fallback. Startup validates /auth/me without clearing credentials on transient errors. GET requests retry 502/503/504/network failures; app start, resume and active 4-minute interval call lightweight /api/health."
+      - agent: testing
+        working: true
+        comment: "Iteration 22 mobile web checks passed: login preview loads at 390x844, GET retries bounded (3 attempts), POST request-otp not retried (1 attempt), cached login survives transient /auth/me network failure, authoritative /auth/me role routing works, 401 clears cached auth, and health ping fires on mount. /auth/me/retry checks were MOCKED in-browser for deterministic startup scenarios."
   - task: "Customer form repair, active plan upgrade action, AI call and bulk-add UI"
     implemented: true
     working: true
@@ -236,10 +264,13 @@ frontend:
 metadata:
   created_by: main_agent
   version: "1.0"
-  test_sequence: 21
+  test_sequence: 22
   run_ui: true
 test_plan:
   current_focus:
+    - "SecureStore save/load/clear and legacy AsyncStorage migration"
+    - "Valid, expired and revoked 30-day JWT startup behavior"
+    - "GET retry and app start/resume health ping without POST retries"
     - "Customer creation with ISP User ID/provider and optional active plan/manual expiry"
     - "Super Admin bulk customer import; Admin/Team/Subscriber role denial"
     - "Subscriber active plan card and Upgrade/Change Plan navigation"
@@ -306,3 +337,5 @@ agent_communication:
     message: "Iteration 16 Super Admin phone migration regression passed 5/5 with WhatsBoost MOCKED. Unique active Super Admin identity, archived prior Admin/data preservation, retired old-number provider bypass, archived-session rejection and health/auth config all passed. No live WhatsApp send was performed."
   - agent: testing
     message: "Iteration 21 complete: backend pytest passed 6/6 for subscriber create + legacy-plan/manual-expiry + super-admin bulk import and role denials, using local JWTs and cleanup. Mobile UI regression (public preview) verified login load, Super/Admin/Team/Subscriber role controls, subscriber ACTIVE card with Upgrade→Recharge navigation, bulk malformed-row blocking behavior, valid bulk result rendering, AI Support number 8826004211 + Call CTA visibility, and 390x844 no-horizontal-overflow checks. WhatsBoost remained MOCKED/untouched; no live provider calls were made."
+  - agent: testing
+    message: "Iteration 22 complete: backend pytest passed 6/6 for 30-day JWT session + exp/jti + logout revocation and /api/health availability. Mobile-first preview checks passed for persistent-auth startup flows, GET retry vs POST non-retry, role-authoritative routing, and 401 clearAuth behavior. Startup-path /auth/me and retry validations used in-browser MOCKED API responses only; WhatsBoost remained MOCKED/untouched with zero live provider calls."
